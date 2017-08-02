@@ -1,0 +1,44 @@
+buildscript {
+    repositories {
+        jcenter()
+    }
+    dependencies {
+        classpath 'com.github.jengelman.gradle.plugins:shadow:2.0.1'
+    }
+}
+
+apply plugin: 'scala'
+apply plugin: 'com.github.johnrengelman.shadow'
+
+sourceCompatibility = 1.8
+version = '1.0'
+
+task wrapper(type: Wrapper) {
+  gradleVersion = '4.0'
+}
+
+jar {
+  manifest {
+    attributes 'Main-Class': 'edu.utulsa.conversation.driver.Driver'
+  }
+}
+
+shadowJar {
+  baseName = 'conv-tm'
+  classifier = null
+  version = null
+}
+
+repositories {
+  mavenCentral()
+}
+
+dependencies {
+  compile 'org.scala-lang:scala-library:2.11.1'
+
+  compile 'org.scalanlp:breeze_2.11:0.12'
+  compile 'org.scalanlp:breeze-natives_2.11:0.12'
+  compile 'org.scalanlp:breeze-viz_2.11:0.12'
+
+  compile 'org.json4s:json4s-native_2.11:3.5.0'
+}
