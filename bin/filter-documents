@@ -1,0 +1,260 @@
+#!/usr/bin/env python3
+
+import json
+import sys, os
+import re
+import argparse
+import itertools
+import random
+
+## Command line args processing
+
+parser = argparse.ArgumentParser(description='Parses a series of text documents into a better format.')
+parser.add_argument('data_file', type=str, metavar='D', help='file with documents.')
+args = parser.parse_args()
+
+## Load documents
+
+data_path = os.path.dirname(args.data_path)
+
+input_file = os.path.join(args.data_file, "")
+output_file = data_path + "documents.json"
+
+print "Loading documents..."
+
+dataset = None
+with open(input_file, 'r') as f:
+    dataset = json.load(f)
+
+print "Parsing structure and filtering comments..."
+
+class Comment:
+    def __init__(self, id, author, content, parent, replies):
+        self.id = id
+        self.author = author
+        self.content = content
+        if parent:
+            self.parent_id = parent
+        else:
+            self.parent_id = None
+        self.parent = None
+        if replies:
+            self.reply_ids = replies
+        else:
+            self.reply_ids = None
+        self.replies = []
+
+    def remove(self):
+        if(self.parent):
+            self.parent.replies.remove(self)
+
+    def collect(self):
+        return [self.id] + list(itertools.chain(*[reply.collect() for reply in self.replies]))
+
+    def size(self):
+        return 1 + sum([reply.size() for reply in self.replies])
+
+def create_comment(d):
+    return Comment(d['id'], d['author'], d['content'], d['reply_to'] if 'reply_to' in d else None, d['replies'] if 'replies' in d else None)
+
+def expand(comment):
+    if comment.reply_ids:
+        comment.replies = [comments[id] for id in comment.reply_ids]
+        for reply in comment.replies:
+            reply.parent_id = comment.id
+            reply.parent = comment
+    elif comment.parent_id:
+        comment.parent = comments[comment.parent_id]
+        comment.parent.replies.append(comment)
+    # comment.replies = [comments[id] for id in comment._replies]
+    # for reply in comment.replies:
+    #     reply.parent = comment
+
+# def expand_tree(comment):
+#     replies = list(comments[comment.id]['replies'])
+#     comment.replies = [create_comment(id) for id in replies]
+#     for reply in comment.replies:
+#         replies += expand_tree(reply)
+#     return replies
+
+comments = dict([(d['id'], create_comment(d)) for d in dataset])
+for id in comments.iterkeys():
+    expand(comments[id])
+roots = filter(lambda comment: comment.parent == None, comments.itervalues())
+
+def delete_comments():
+    global dataset
+    to_delete = []
+    for d in comments.itervalues():
+        if d.content == "[removed]" or d.content == "[deleted]" or d.content == None\
+           or d.author == "AutoModerator" or d.author == "DeltaBot" or d.author == None or d.author == "[deleted]" or d.author == "[removed":
+            to_delete += d.collect()
+            d.remove()
+    for root in roots:
+        size = root.size()
+        # if size <= 2:
+        #     to_delete += root.collect()
+        ratio = 70000.0 / float(len(comments))
+        if len(comments) > 70000 and random.random() > ratio:
+            to_delete += root.collect()
+    to_delete = set(to_delete)
+    dataset = [item for item in dataset if item['id'] not in to_delete]
+
+delete_comments()
+
+print len(dataset), "comments."
+print len(roots), "conversations."
+
+# def expand_tree(items, id):
+#     return [id] + list(itertools.chain(*[expand_tree(items, reply) for reply in items[id]['replies']]))
+
+# def delete_comments():
+#     global dataset
+#     items = dict((item['id'], item) for item in dataset)
+#     to_delete = []
+#     for d in dataset:
+#         if d['content'] == "[removed]" or d['content'] == "[deleted]" or d['content'] == None\
+#            or d['author'] == "AutoModerator" or d['author'] == None or d['author'] == "[deleted]" or d['author'] == "[removed]":
+#             to_delete += expand_tree(items, d['id'])
+#     to_delete = set(to_delete)
+#     dataset = [d for d in dataset if d['id'] not in to_delete]
+
+# delete_comments()
+
+# # Used for testing purposes
+# dataset = dataset[:10]
+
+documents = []
+for d in dataset:
+    tmp = d['content']
+    # ## replacing subreddits -- using unique pattern to get something semi-readable later
+    # tmp = re.sub('/r/(.*?)(\s|$)', 'IIIIIredditaaa\g<1>IIIII', tmp)
+    # tmp = re.sub('/u/(.*?)(\s|$)', 'IIIIIuseraaa\g<1>IIIII', tmp)
+    ## replacing USA acronyms
+    # tmp = re.sub('U\.?S(\.?|\.?A)>', 'tUSA', tmp)
+    ## remove links
+    # tmp = re.sub('\[(.*?)\]\(.*?\)', '\g<1>', tmp)
+    # tmp = re.sub('http[s]?://.+?(\s|$)', '', tmp)
+    # # tmp = re.sub('>.*?(\n|$)', ' ', tmp)
+    # ## remove quotes
+    # tmp = re.sub('"', ' ', tmp)
+    # ## replace newlines
+    # tmp = re.sub('\n', ' ', tmp)
+    # ## remove punctuation
+    # tmp = re.sub('(\w+)\'s', '\g<1>', tmp)
+    # tmp = re.sub('[!@#$%\^&*,.;:?()\[\]]', ' ', tmp)
+    # # tmp = re.sub('[^A-Za-z0-9 ]', ' ', tmp)
+    # ## cut down spaces
+    tmp = re.sub('[^A-Za-z0-9\']+', ' ', tmp)
+    tmp = re.sub('\s+', ' ', tmp)
+    # ## restore subreddits
+    # tmp = re.sub('IIIIIredditaaa(.*?)IIIII', '/r/\g<1>', tmp)
+    # tmp = re.sub('IIIIIuseraaa(.*?)IIIII', '/u/\g<1>', tmp)
+    ## remove boundary spaces
+    tmp = tmp.strip()
+    ## reassign to content
+    documents.append(tmp.decode('unicode_escape').encode('ascii', 'ignore'))
+
+# # also for testing
+# for d, document in zip(dataset, documents):
+#     print '#' * 20, 'ORIGINAL'
+#     print d['author']
+#     print
+#     print d['content']
+#     print
+#     print '#' * 20, 'PROCESSED'
+#     print document
+#     raw_input('Press [ENTER] to continue...')
+#     print
+
+
+## Tokenize
+
+print "Tokenizing..."
+
+import nltk.tokenize.simple as tokenize
+
+tokenizer = tokenize.SpaceTokenizer()
+
+documents = [tokenizer.tokenize(document.lower()) for document in documents]
+
+
+## Remove stopwords
+
+print "Removing stopwords..."
+
+# from stop_words import get_stop_words
+
+# stop_words = get_stop_words('en')
+
+# documents = [[w for w in document if not w in stop_words] for document in documents]
+
+from nltk.corpus import stopwords
+
+stop_words = set(stopwords.words("english"))
+
+documents = [[w for w in document if not w in stop_words] for document in documents]
+
+
+## Stemming
+
+print "Stemming..."
+
+from nltk.stem.porter import PorterStemmer
+
+stemmer = PorterStemmer()
+
+documents = [[stemmer.stem(w) for w in document] for document in documents]
+
+## Counting words
+
+print "Removing uncommon words..."
+
+count = {}
+for document in documents:
+    for word in set(document):
+        if word not in count:
+            count[word] = 0
+        count[word] += 1
+
+num_documents = len(documents)
+
+
+# manually_removed_words = set(['peopl', 'get', 'would', 'know', 'like', 'make', 'don\'t'])
+allowed_words = set([word for word in count.iterkeys() if count[word] >= 10])
+
+print sorted(allowed_words)
+
+documents = [[w for w in document if w in allowed_words] for document in documents]
+
+## Export
+
+print " # of words:", len(allowed_words)
+print " # of documents:", len(documents)
+
+print "Exporting results..."
+
+results = []
+for document, meta in zip(documents, dataset):
+    comment = comments[meta['id']]
+    results.append({
+        'id': meta['id'],
+        'author': meta['author'],
+        # 'content': meta['content'],
+        'words': document,
+        # 'replies': [reply.id for reply in comments[meta['id']].replies]
+        'parent': comment.parent_id
+    })
+
+# with open(args.data_directory + 'lda_documents_t%03d.json' % (num_topics,), 'w') as f:
+#     f.write(json.dumps(results, indent=2))
+
+# with open(args.data_directory + 'lda_topics_t%03d.json' % (num_topics,), 'w') as f:
+#     topics = [lda.get_topic_terms(i, 50) for i in range(num_topics)]
+#     topics = [[(dictionary.id2token[w], s) for w,s in topic] for topic in topics]
+#     f.write(json.dumps(topics, indent=2))
+
+with open(output_file, 'w') as f:
+    f.write(json.dumps(results, indent=1))
+
+print "Done!"
