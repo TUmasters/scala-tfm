@@ -1,3 +1,7 @@
+## Project-specific
+/data
+
+## Gradle
 .gradle
 /build/
 
