@@ -20,13 +20,13 @@ data_path = os.path.dirname(args.data_path)
 input_file = os.path.join(args.data_file, "")
 output_file = data_path + "documents.json"
 
-print "Loading documents..."
+print("Loading documents...")
 
 dataset = None
 with open(input_file, 'r') as f:
     dataset = json.load(f)
 
-print "Parsing structure and filtering comments..."
+print("Parsing structure and filtering comments...")
 
 class Comment:
     def __init__(self, id, author, content, parent, replies):
@@ -102,8 +102,8 @@ def delete_comments():
 
 delete_comments()
 
-print len(dataset), "comments."
-print len(roots), "conversations."
+print("{} documents.".format(len(dataset)))
+print("{} conversations.".format(len(roots)))
 
 # def expand_tree(items, id):
 #     return [id] + list(itertools.chain(*[expand_tree(items, reply) for reply in items[id]['replies']]))
@@ -170,7 +170,7 @@ for d in dataset:
 
 ## Tokenize
 
-print "Tokenizing..."
+print("Tokenizing...")
 
 import nltk.tokenize.simple as tokenize
 
@@ -181,7 +181,7 @@ documents = [tokenizer.tokenize(document.lower()) for document in documents]
 
 ## Remove stopwords
 
-print "Removing stopwords..."
+print("Removing stopwords...")
 
 # from stop_words import get_stop_words
 
@@ -198,18 +198,14 @@ documents = [[w for w in document if not w in stop_words] for document in docume
 
 ## Stemming
 
-print "Stemming..."
-
+print("Stemming...")
 from nltk.stem.porter import PorterStemmer
-
 stemmer = PorterStemmer()
-
 documents = [[stemmer.stem(w) for w in document] for document in documents]
 
 ## Counting words
 
-print "Removing uncommon words..."
-
+print("Removing uncommon words...")
 count = {}
 for document in documents:
     for word in set(document):
@@ -219,20 +215,16 @@ for document in documents:
 
 num_documents = len(documents)
 
-
 # manually_removed_words = set(['peopl', 'get', 'would', 'know', 'like', 'make', 'don\'t'])
 allowed_words = set([word for word in count.iterkeys() if count[word] >= 10])
-
-print sorted(allowed_words)
-
 documents = [[w for w in document if w in allowed_words] for document in documents]
 
 ## Export
 
-print " # of words:", len(allowed_words)
-print " # of documents:", len(documents)
+print(" # of words:", len(allowed_words))
+print(" # of documents:", len(documents))
 
-print "Exporting results..."
+print("Exporting results...")
 
 results = []
 for document, meta in zip(documents, dataset):
@@ -257,4 +249,4 @@ for document, meta in zip(documents, dataset):
 with open(output_file, 'w') as f:
     f.write(json.dumps(results, indent=1))
 
-print "Done!"
+print("Done!")
