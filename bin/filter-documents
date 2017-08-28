@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 
 import json
 import sys, os
@@ -15,9 +15,9 @@ args = parser.parse_args()
 
 ## Load documents
 
-data_path = os.path.dirname(args.data_path)
+data_path = os.path.dirname(args.data_file)
 
-input_file = os.path.join(args.data_file, "")
+input_file = args.data_file
 output_file = data_path + "documents.json"
 
 print("Loading documents...")
@@ -80,7 +80,7 @@ def expand(comment):
 comments = dict([(d['id'], create_comment(d)) for d in dataset])
 for id in comments.iterkeys():
     expand(comments[id])
-roots = filter(lambda comment: comment.parent == None, comments.itervalues())
+roots = list(filter(lambda comment: comment.parent == None, comments.itervalues()))
 
 def delete_comments():
     global dataset
@@ -171,11 +171,8 @@ for d in dataset:
 ## Tokenize
 
 print("Tokenizing...")
-
 import nltk.tokenize.simple as tokenize
-
 tokenizer = tokenize.SpaceTokenizer()
-
 documents = [tokenizer.tokenize(document.lower()) for document in documents]
 
 
@@ -184,15 +181,11 @@ documents = [tokenizer.tokenize(document.lower()) for document in documents]
 print("Removing stopwords...")
 
 # from stop_words import get_stop_words
-
 # stop_words = get_stop_words('en')
-
 # documents = [[w for w in document if not w in stop_words] for document in documents]
 
 from nltk.corpus import stopwords
-
 stop_words = set(stopwords.words("english"))
-
 documents = [[w for w in document if not w in stop_words] for document in documents]
 
 
@@ -221,8 +214,8 @@ documents = [[w for w in document if w in allowed_words] for document in documen
 
 ## Export
 
-print(" # of words:", len(allowed_words))
-print(" # of documents:", len(documents))
+print(" # of words: {}".format(len(allowed_words)))
+print(" # of documents: {}".format(len(documents)))
 
 print("Exporting results...")
 
