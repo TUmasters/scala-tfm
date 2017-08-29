@@ -24,7 +24,7 @@ jar {
 }
 
 shadowJar {
-  baseName = 'conv-tm'
+  baseName = 'tfm-cli'
   classifier = null
   version = null
 }
