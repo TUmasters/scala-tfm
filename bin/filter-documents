@@ -18,7 +18,7 @@ args = parser.parse_args()
 data_path = os.path.dirname(args.data_file)
 
 input_file = args.data_file
-output_file = data_path + "documents.json"
+output_file = data_path + "/documents.json"
 
 print("Loading documents...")
 
