@@ -23,3 +23,6 @@ gradle-app.setting
 /.idea
 /out
 *.iml
+
+*.pyc
+__pycache__/
