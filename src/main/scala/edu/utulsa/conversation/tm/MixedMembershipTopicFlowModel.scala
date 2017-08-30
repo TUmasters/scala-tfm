@@ -1,17 +1,20 @@
 package edu.utulsa.conversation.tm
 
 import breeze.linalg._
-import breeze.numerics.{pow,abs,log,exp}
+import breeze.numerics.{abs, exp, log, pow}
 import breeze.optimize._
 import org.json4s._
 import org.json4s.native.JsonMethods._
 import org.json4s.native.Serialization
-import org.json4s.native.Serialization.{write}
+import org.json4s.native.Serialization.write
 import java.io.File
 import java.io.PrintWriter
+
+import edu.utulsa.conversation.text.{Corpus, Document}
+
 import scala.util.control.Breaks._
 
-class MMCTMOptimize(val N: Int, val M: Int, val K: Int, val sigma: DenseMatrix[Double], val a: DenseMatrix[Double], val theta: DenseMatrix[Double])(val corpus: Corpus) extends TopicUtils {
+class MMCTMOptimize(val N: Int, val M: Int, val K: Int, val sigma: DenseMatrix[Double], val a: DenseMatrix[Double], val theta: DenseMatrix[Double])(val corpus: Corpus) extends MathUtils {
   var nodes: Seq[DNode] = null
   var roots: Seq[DNode] = null
   var trees: Seq[DTree] = null
@@ -428,7 +431,7 @@ class MMCTMOptimize(val N: Int, val M: Int, val K: Int, val sigma: DenseMatrix[D
  * MIXED MEMBERSHIP CONVERSATIONAL TOPIC MODEL
  ****************************************************************/
 
-class MMCTopicModel(override val corpus: Corpus, saveDir: String) extends TopicModel(corpus) with TopicUtils {
+class MMCTopicModel(override val corpus: Corpus, saveDir: String) extends TopicModel(corpus) with MathUtils {
   private val dsave = if(!saveDir.endsWith("/")) saveDir + "/" else saveDir
   private var N: Int = corpus.numDocuments
   private var M: Int = corpus.numWords
@@ -529,7 +532,7 @@ class MMCTopicModel(override val corpus: Corpus, saveDir: String) extends TopicM
         node.document.id -> node.q.map {
           case (i, w) =>
             w.toArray.zipWithIndex.sortBy(-_._1).take(1)
-              .map((t) => WResult(corpus.dict(i), t._2, t._1)).head
+              .map((t) => WResult(corpus.words(i), t._2, t._1)).head
         }.toList
       }.toMap,
       K

@@ -2,6 +2,7 @@ package edu.utulsa.conversation.tm
 
 import breeze.linalg._
 import breeze.numerics._
+import edu.utulsa.conversation.text.{Corpus, Document}
 
 // Implementation of LDA based on Variational Inference EM algorithm
 // given in http://www.cs.columbia.edu/~blei/papers/BleiLafferty2009.pdf

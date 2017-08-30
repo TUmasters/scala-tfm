@@ -1,18 +1,21 @@
 package edu.utulsa.conversation.tm
 
 import breeze.linalg._
-import breeze.numerics.{log, log1p, exp, pow}
-import java.io.{File}
+import breeze.numerics.{exp, log, log1p, pow}
+import java.io.File
+
 import org.json4s._
 import org.json4s.native.JsonMethods._
 import org.json4s.native.Serialization
-import org.json4s.native.Serialization.{write}
+import org.json4s.native.Serialization.write
 import java.io.PrintWriter
+
+import edu.utulsa.conversation.text.{Corpus, Document}
 
 class UCTMParams(
   val pi: Array[DenseVector[Double]],
   val a: Array[DenseMatrix[Double]],
-  val theta: DenseMatrix[Double]) extends TopicUtils {
+  val theta: DenseMatrix[Double]) extends MathUtils {
 
   val id: Int = rand.nextInt()
 
@@ -53,7 +56,7 @@ sealed class InferenceSolver(val q: DenseMatrix[Double], val r: DenseMatrix[Doub
     }.toMap
 
     println(" - Creating author nodes...")
-    val unodes: Map[Int, UNode] = corpus.users.items.map { case (author: Int) =>
+    val unodes: Map[Int, UNode] = corpus.authors.items.map { case (author: Int) =>
       author -> new UNode(author)
     }.toMap
 
@@ -61,7 +64,7 @@ sealed class InferenceSolver(val q: DenseMatrix[Double], val r: DenseMatrix[Doub
     dnodes.foreach { case (document, node) =>
       if(document.parent != null)
         node.parent = dnodes(document.parent)
-      node.children = document.children.map(dnodes(_)).toSeq
+      node.children = document.replies.map(dnodes(_)).toSeq
     }
 
     println(" - Mapping users to authors...")
@@ -129,7 +132,7 @@ sealed class InferenceSolver(val q: DenseMatrix[Double], val r: DenseMatrix[Doub
   ////////////////////////////////////////////////////////////////
   // USER NODE
   ////////////////////////////////////////////////////////////////
-  sealed class UNode(val user: Int) extends TopicUtils {
+  sealed class UNode(val user: Int) extends MathUtils {
     var documents: Seq[DNode] = Seq()
     val r_g = Term[DenseVector[Double]] { (params) =>
       implicit val tmp = params
@@ -157,7 +160,7 @@ sealed class InferenceSolver(val q: DenseMatrix[Double], val r: DenseMatrix[Doub
     }
   }
 
-  sealed class DNode(val document: Document, val index: Int) extends TopicUtils {
+  sealed class DNode(val document: Document, val index: Int) extends MathUtils {
     var parent: DNode = null
     var author: Int = -1
     var children: Seq[DNode] = Seq()
@@ -256,7 +259,7 @@ sealed class InferenceSolver(val q: DenseMatrix[Double], val r: DenseMatrix[Doub
 }
 
 class UCTopicModel(override val corpus: Corpus)
-    extends TopicModel(corpus) with TopicUtils {
+    extends TopicModel(corpus) with MathUtils {
   var G: Int = 5
   def setNumUserGroups(numGroups: Int): this.type = {
     this.G = numGroups
@@ -418,7 +421,7 @@ class UCTopicModel(override val corpus: Corpus)
     val wordWeights: Map[Int, Map[String, Double]] = (0 until K).map { case (k) =>
       k -> (0 until M).map { case (w) =>
         // WordWeight(corpus.dictionary(w), scaledTheta(w, k))
-        corpus.dict(w) -> scaledTheta(w, k)
+        corpus.words(w) -> scaledTheta(w, k)
       }.toMap
     }.toMap
     Some(new PrintWriter(d + "word_weights.json"))
@@ -434,6 +437,6 @@ class UCTopicModel(override val corpus: Corpus)
   }
 }
 
-object UCTopicModel {
+object UserAwareTopicFlowModel {
   def apply(corpus: Corpus) = new UCTopicModel(corpus)
 }

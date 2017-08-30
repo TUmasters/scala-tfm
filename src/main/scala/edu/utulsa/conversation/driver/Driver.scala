@@ -6,8 +6,10 @@ import org.json4s.native.JsonMethods._
 import org.json4s.native.Serialization
 import org.json4s.native.Serialization.write
 import java.io.File
-import scala.reflect.runtime.universe._
 
+import edu.utulsa.conversation.text.{Corpus, DocumentData}
+
+import scala.reflect.runtime.universe._
 import scala.collection.mutable
 
 case class JSONDocument(id: String, words: List[String], parent: String, author: String)
@@ -61,7 +63,7 @@ object Driver {
   )
   val algorithms: Seq[String] = Seq("lda", "ntfm", "uatfm", "mmtfm")
   private val algorithm = new Argument[String](
-    """Algorithm to use. Results are saved to a unique subdirectory.""",
+    s"""Algorithm to use. Results are saved to a unique subdirectory. Choices: $algorithms""",
     "--algorithm",
     Some("mmtfm"),
     (arg: String) => algorithms contains arg
@@ -141,9 +143,9 @@ object Driver {
       case _ if $(algorithm) == "lda" =>
         LDA(corpus)
       case _ if $(algorithm) == "ntfm" =>
-        CTopicModel(corpus)
+        NaiveMathFlowModel(corpus)
       case _ if $(algorithm) == "uatfm" =>
-        UCTopicModel(corpus)
+        UCMathModel(corpus)
           .setNumUserGroups($(numUserGroups))
       case _ if $(algorithm) == "mmtfm" =>
         MMCTopicModel(corpus, $(outputDir))
