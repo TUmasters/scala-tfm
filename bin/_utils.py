@@ -1,4 +1,5 @@
 import itertools
+from collections import deque
 class Comment:
     def __init__(self, id, author, content, parent, replies):
         self.id = id
@@ -24,9 +25,19 @@ class Comment:
 
     def size(self):
         return 1 + sum([reply.size() for reply in self.replies])
+    def __iter__(self):
+        q = deque([])
+        q.append(self)
+        while len(q) > 0:
+            item = q.popleft()
+            for com in item.replies:
+                q.append(com)
+            yield item
+        
+
 
 def create_comment(d):
-    return Comment(d['id'], d['author'], d['words'], d['reply_to'] if 'reply_to' in d else None, d['replies'] if 'replies' in d else None)
+    return Comment(d['id'], d['author'], d['words'], d['parent'], d['replies'] if 'replies' in d else None)
 
 def expand(comment,comments):
     if comment.reply_ids:
@@ -47,3 +58,5 @@ def expand(comment,comments):
 #     for reply in comment.replies:
 #         replies += expand_tree(reply)
 #     return replies
+
+
