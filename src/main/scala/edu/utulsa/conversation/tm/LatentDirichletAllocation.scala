@@ -1,143 +1,164 @@
 package edu.utulsa.conversation.tm
 
+import java.io.File
+
 import breeze.linalg._
 import breeze.numerics._
-import edu.utulsa.conversation.text.{Corpus, Document}
+import edu.utulsa.conversation.text.{Corpus, Dictionary, Document}
+
+class LatentDirichletAllocation
+(
+  override val numTopics: Int,
+  override val words: Dictionary,
+  override val documentInfo: List[DocumentTopic],
+  val alpha: DenseVector[Double],
+  val beta: DenseMatrix[Double]
+) extends TopicModel(numTopics, words, documentInfo) {
+  override protected def saveModel(dir: File): Unit = {
+    import MathUtils.csvwritevec
+    csvwritevec(new File(dir + "/alpha.mat"), alpha)
+    csvwrite(new File(dir + "/beta.mat"), beta)
+  }
+
+  override def likelihood(corpus: Corpus): Double = ???
+}
+
+object LatentDirichletAllocation {
+  def train(corpus: Corpus, numTopics: Int, numIterations: Int, maxAlphaIterations: Int): LatentDirichletAllocation =
+    new LDAOptimizer(corpus, numTopics, numIterations, maxAlphaIterations)
+      .train()
+}
 
 // Implementation of LDA based on Variational Inference EM algorithm
 // given in http://www.cs.columbia.edu/~blei/papers/BleiLafferty2009.pdf
-class LDAModel(override val corpus: Corpus) extends TopicModel(corpus) {
-  // Model hyperparameters
-  var alpha: DenseVector[Double] = null
-  var eta: Double = 1.0
+class LDAOptimizer
+(
+  override val corpus: Corpus,
+  override val numTopics: Int,
+  val numIterations: Int,
+  val maxAlphaIterations: Int = 15
+) extends TMOptimizer[LatentDirichletAllocation](corpus, numTopics) {
 
-  override def train(): this.type = {
-    init()
+  import MathUtils._
+
+  val N = corpus.size
+  val M = corpus.words.size
+
+  // Model hyperparameters
+  val alpha: DenseVector[Double] = DenseVector.rand(K) :* 3.0
+  val eta: Double = 1.0
+
+  val lambda: DenseMatrix[Double] = DenseMatrix.zeros[Double](M, K)
+  val beta: DenseMatrix[Double] = DenseMatrix.zeros[Double](M, K)
+  val nodes: Seq[DNode] = corpus.map((document) => new DNode(document)).toSeq
+
+  override def train(): LatentDirichletAllocation = {
     (1 to numIterations).foreach { (i) =>
       println(s" Iteration $i")
       println("  E-Step")
-      optimize.eStep()
+      eStep()
       println("  M-Step")
-      optimize.mStep()
+      mStep()
     }
-    this
+    val d: List[DocumentTopic] = nodes.map((n) =>
+      DocumentTopic(n.document.id, n.gamma.data.zipWithIndex.map {
+        case (p, i) => TPair(p, i)
+      }.toList)
+    ).toList
+    new LatentDirichletAllocation(numTopics, corpus.words, d, alpha, beta)
   }
 
-  // Usually used to save the model to file -- not necessary right now.
-  override def save(dir: String): Unit = ???
-
-  protected def init(): Unit = {
-    alpha = DenseVector.rand(K) :* 3.0
-    optimize.init()
+  def eStep() {
+    // println("alpha")
+    // println(alpha)
+    lambda := DenseMatrix.ones[Double](M, K) :* 0.1
+    nodes.par.foreach { case (node) =>
+      node.phi.par.foreach { case (word, count, row) =>
+        lambda(word, ::) :+= row.t :* count.toDouble
+      }
+    }
+    // println("lambda[1,:] = ")
+    // println(lambda(1, ::))
+    val dgLambdaS = digamma(sum(lambda(::, *))).t
+    nodes.foreach { case (n) => n.variationalUpdate(lambda, dgLambdaS) }
+    beta := normalize(lambda, Axis._1, 1.0)
   }
 
-  // Using an object for now, may use an optimizer class later like
-  // Apache Spark does.
-  protected object optimize {
-    var lambda: DenseMatrix[Double] = null
-    var beta: DenseMatrix[Double] = null
+  def mStep(): Unit = {
+    maximizeAlpha()
+  }
 
-    class DNode(document: Document) {
-      var gamma = alpha.copy
-      // Use a sparse matrix to save on space :)
-      var phi = Seq[(Int, Int, DenseVector[Double])]()
+  class DNode(val document: Document) {
+    val gamma: DenseVector[Double] = alpha.copy
+    // Use a sparse matrix to save on space :)
+    val phi: Seq[(Int, Int, DenseVector[Double])] = {
+      document.count.map { case (word, count) =>
+        (word, count, DenseVector.zeros[Double](K))
+      }
+    }
 
-      // Part (2) of Algorithm in Figure 5 of Blei paper
-      def variationalUpdate(lambda: DenseMatrix[Double], dgLambdaS: DenseVector[Double]): Unit = {
-        // (a)
-        if(phi.size > 0)
-          gamma := alpha :+ phi.map { case (w, c, r) => r * (c.toDouble) }.reduce(_ + _)
-        else
-          gamma := alpha
+    // Part (2) of Algorithm in Figure 5 of Blei paper
+    def variationalUpdate(lambda: DenseMatrix[Double], dgLambdaS: DenseVector[Double]): Unit = {
+      // (a)
+      if (phi.size > 0)
+        gamma := alpha :+ phi.map { case (w, c, r) => r * (c.toDouble) }.reduce(_ + _)
+      else
+        gamma := alpha
 
-        val digammaGamma = digamma(gamma)
-        // (b)
-        phi = document.count.map { case (word, count) =>
-          // First assign (in log form)
-          val row = digammaGamma :+ digamma(lambda(word, ::).t) :- dgLambdaS :+ log(count)
-          // Now normalize (using safer LogSumExp method)
+      val digammaGamma = digamma(gamma)
+      // (b)
+      phi.foreach { case (word, count, row) =>
+          row := digammaGamma :+ digamma(lambda(word, ::).t) :- dgLambdaS :+ log(count)
           row := exp(row :- lse(row))
-          (word, count, row)
-        }
       }
-    }
-
-    var nodes: Seq[DNode] = null
-
-    def init(): Unit = {
-      lambda = DenseMatrix.zeros[Double](corpus.numWords, K)
-      beta = DenseMatrix.zeros(corpus.numWords, K)
-      nodes = corpus.documents.map((document) => new DNode(document))
-    }
-
-    def eStep() {
-      // println("alpha")
-      // println(alpha)
-      lambda := DenseMatrix.ones[Double](corpus.numWords, K) :* 0.1
-      nodes.par.foreach { case (node) =>
-        node.phi.par.foreach { case (word, count, row) =>
-          lambda(word, ::) :+= row.t :* (count.toDouble)
-        }
-      }
-      // println("lambda[1,:] = ")
-      // println(lambda(1, ::))
-      val dgLambdaS = digamma(sum(lambda(::, *))).t
-      nodes.foreach { case (n) => n.variationalUpdate(lambda, dgLambdaS) }
-      beta := normalize(lambda, Axis._1, 1.0)
-    }
-
-    def maximizeAlpha(): Unit = {
-      val g2 = nodes.map((n) => digamma(n.gamma) :- digamma(sum(n.gamma))).reduce(_ + _)
-      def alphaStep(): Double = {
-        // Basically step-for-step Newton's method as described in
-        // Appendix A.2 and A.4 of
-        // http://www.cs.columbia.edu/~blei/papers/BleiNgJordan2003.pdf
-        val M = corpus.numDocuments.toDouble
-        // val alphaOld = alpha.copy
-        // println(alpha)
-        val h = trigamma(alpha) :* (-M)
-        // println("h")
-        // println(h)
-        val z = trigamma(sum(alpha))
-        // println("z")
-        // println(z)
-        val g1 = (digamma(sum(alpha)) - digamma(alpha)) :* M
-        // println("g1")
-        // println(g1)
-        // println("g2")
-        // println(g2)
-        val g = g1 :+ g2
-        // println("g")
-        // println(g)
-        val c = sum(g :/ h) / ((1.0 / z) + sum(h.map(1.0 / _)))
-        // println("c")
-        // println(c)
-        val newGrad = (g :- c) :/ h
-        // println("newGrad")
-        // println(newGrad)
-        alpha :-= newGrad
-        // println("newAlpha")
-        // // bad method of dealing with constraints
-        // alpha := alpha.map((x) => if(x > 1e-2) x else 1e-2)
-        // alpha := alpha.map((x) => if(x < 10.0) x else 10.0)
-        // println(alpha)
-        // println(norm(newGrad))
-        norm(newGrad)
-      }
-      var iterations = 0
-      // Should be fast convergence
-      while(alphaStep() > 0.01 && iterations < 1000)
-        iterations += 1
-      println(s"alpha = $alpha")
-      println(s"    Iterations: $iterations")
-    }
-
-    def mStep(): Unit = {
-      maximizeAlpha()
     }
   }
-}
 
-object LDA {
-  def apply(corpus: Corpus) = new LDAModel(corpus)
+  def maximizeAlpha(): Unit = {
+    val g2 = nodes.map((n) => digamma(n.gamma) :- digamma(sum(n.gamma))).reduce(_ + _)
+
+    def alphaStep(): Double = {
+      // Basically step-for-step Newton's method as described in
+      // Appendix A.2 and A.4 of
+      // http://www.cs.columbia.edu/~blei/papers/BleiNgJordan2003.pdf
+      // val alphaOld = alpha.copy
+      // println(alpha)
+      val m: Double = M.toDouble
+      val h: DenseVector[Double] = trigamma(alpha) :* (-m)
+      // println("h")
+      // println(h)
+      val z: Double = trigamma(sum(alpha))
+      // println("z")
+      // println(z)
+      val g1: DenseVector[Double] = (digamma(sum(alpha)) - digamma(alpha)) :* m
+      // println("g1")
+      // println(g1)
+      // println("g2")
+      // println(g2)
+      val g: DenseVector[Double] = g1 :+ g2
+      // println("g")
+      // println(g)
+      val c: Double = sum(g :/ h) / ((1.0 / z) + sum(h.map(1.0 / _)))
+      // println("c")
+      // println(c)
+      val newGrad: DenseVector[Double] = (g :- c) :/ h
+      // println("newGrad")
+      // println(newGrad)
+      alpha :-= newGrad
+      // println("newAlpha")
+      // // bad method of dealing with constraints
+      // alpha := alpha.map((x) => if(x > 1e-2) x else 1e-2)
+      // alpha := alpha.map((x) => if(x < 10.0) x else 10.0)
+      // println(alpha)
+      // println(norm(newGrad))
+      norm(newGrad)
+    }
+
+    var iterations = 0
+    // Should be fast convergence
+    while (alphaStep() > 0.01 && iterations < maxAlphaIterations)
+      iterations += 1
+    println(s"alpha = $alpha")
+    println(s"    Iterations: $iterations")
+  }
 }

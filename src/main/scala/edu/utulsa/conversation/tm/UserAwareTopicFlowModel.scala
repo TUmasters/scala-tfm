@@ -10,65 +10,95 @@ import org.json4s.native.Serialization
 import org.json4s.native.Serialization.write
 import java.io.PrintWriter
 
-import edu.utulsa.conversation.text.{Corpus, Document}
+import edu.utulsa.conversation.text.{Corpus, Dictionary, Document}
 
-class UCTMParams(
+class UserAwareTopicFlowModel
+(
+  override val numTopics: Int,
+  val numUserGroups: Int,
+  override val words: Dictionary,
+  val authors: Dictionary,
+  override val documentInfo: List[DocumentTopic],
   val pi: Array[DenseVector[Double]],
   val a: Array[DenseMatrix[Double]],
-  val theta: DenseMatrix[Double]) extends MathUtils {
-
-  val id: Int = rand.nextInt()
-
-  /** Track these values just in case we need them **/
-  lazy val logPi: Array[DenseVector[Double]] = pi.map(pig => log(pig))
-  lazy val logA: Array[DenseMatrix[Double]] = a.map(ag => log(ag))
-  lazy val logTheta: DenseMatrix[Double] = log(theta)
-}
-
-/**
-  * Basically a class for memoization, that updates based on cached value.
-  */
-sealed class Term[T >: Null](update: (UCTMParams) => T) {
-  private var updated: Int = 0
-  private var value: T = null
-  def apply()(implicit params: UCTMParams): T = {
-    if(params.id != this.updated) {
-      this.updated = params.id
-      this.value = this.update(params)
+  val theta: DenseMatrix[Double]
+) extends TopicModel(numTopics, words, documentInfo) {
+  override protected def saveModel(dir: File): Unit = {
+    csvwrite(new File(dir + "/theta.csv"), theta)
+    for(i <- 0 until numUserGroups) {
+      MathUtils.csvwritevec(new File(dir + f"/pi.g$i%02d.csv"), pi(i))
+      csvwrite(new File(dir + f"/a.g$i%02d.csv"), a(i))
     }
-    this.value
   }
-  def get: T = this.value
+  override def likelihood(corpus: Corpus): Double = ???
 }
 
-object Term {
-  def apply[T >: Null](update: (UCTMParams) => T): Term[T] = {
-    new Term[T](update)
+object UserAwareTopicFlowModel {
+  def train
+  (
+    corpus: Corpus,
+    numTopics: Int,
+    numUserGroups: Int,
+    numIterations: Int,
+    maxEIterations: Int
+  ): UserAwareTopicFlowModel = {
+    new UATFMOptimizer(corpus, numTopics, numUserGroups, numIterations, maxEIterations)
+      .train()
   }
 }
 
+sealed class UATFMOptimizer
+(
+  override val corpus: Corpus,
+  override val numTopics: Int,
+  val numUserGroups: Int,
+  val numIterations: Int,
+  val maxEIterations: Int
+) extends TMOptimizer[UserAwareTopicFlowModel](corpus, numTopics) {
 
-sealed class InferenceSolver(val q: DenseMatrix[Double], val r: DenseMatrix[Double], val qr: Array[DenseMatrix[Double]], val K: Int, val G: Int)(corpus: Corpus) {
-  private def collect(corpus: Corpus): (Seq[DTree], Seq[DNode], Seq[UNode]) = {
+  import MathUtils._
 
-    val dnodes: Map[Document, DNode] = corpus.documents.zipWithIndex.map { case (document, index) =>
+  override def train(): UserAwareTopicFlowModel = {
+    println("Initializing...")
+    (1 to numIterations).foreach { (interval) =>
+      println(s" Interval: $interval")
+      println("  - E step")
+      eStep(interval)
+      println("  - M step")
+      mStep(interval)
+    }
+    val d: List[DocumentTopic] = dnodes.map((node) =>
+      DocumentTopic(node.document.id, node.q_d().data.zipWithIndex.map { case (p, i) => TPair(p, i) }.toList)
+    ).toList
+    new UserAwareTopicFlowModel(numTopics, numUserGroups, corpus.words, corpus.authors, d, pi, a, theta)
+  }
+
+  val N: Int = corpus.size
+  val M: Int = corpus.words.size
+  val U: Int = corpus.authors.size
+  def G: Int = numUserGroups
+
+  val (trees: Seq[DTree], dnodes: Seq[DNode], unodes: Seq[UNode]) = {
+    val dnodes: Map[Document, DNode] = corpus.zipWithIndex.map { case (document, index) =>
       document -> new DNode(document, index)
     }.toMap
 
     println(" - Creating author nodes...")
-    val unodes: Map[Int, UNode] = corpus.authors.items.map { case (author: Int) =>
+    val unodes: Map[Int, UNode] = corpus.authors.ids.map { case (author: Int) =>
       author -> new UNode(author)
     }.toMap
 
     println(" - Mapping replies...")
     dnodes.foreach { case (document, node) =>
-      if(document.parent != null)
-        node.parent = dnodes(document.parent)
+      node.parent = document.parent match {
+        case Some(key) => dnodes(key)
+        case None => null
+      }
       node.children = document.replies.map(dnodes(_)).toSeq
     }
 
     println(" - Mapping users to authors...")
-    corpus.documents.groupBy(_.author).foreach { case (author: Int, documents: List[Document]) =>
+    corpus.groupBy(_.author).foreach { case (author: Int, documents: List[Document]) =>
       unodes(author).documents = documents.map(dnodes(_)).toSeq
       documents.foreach((document) =>
         dnodes(document).author = author
@@ -76,23 +106,101 @@ sealed class InferenceSolver(val q: DenseMatrix[Double], val r: DenseMatrix[Doub
     }
 
     println(" - Creating trees...")
-    val trees = dnodes.map(_._2)
+    val trees = dnodes.values
       .filter((node) => node.isRoot)
       .map((root) => new DTree(root))
       .toSeq
 
-    (trees, dnodes.map(_._2).toSeq, unodes.map(_._2).toSeq)
+    (trees, dnodes.values.toSeq, unodes.values.toSeq)
   }
 
-  val (trees: Seq[DTree], dnodes: Seq[DNode], unodes: Seq[UNode]) = collect(corpus)
-  lazy val roots = trees.map((tree) => tree.root.index)
+  class UATFMParams
+  (
+    val pi: Array[DenseVector[Double]],
+    val a: Array[DenseMatrix[Double]],
+    val theta: DenseMatrix[Double]
+  ) {
+    import MathUtils._
 
-  implicit var params: UCTMParams = null
+    val id: Int = rand.nextInt()
 
-  def update(pi: Array[DenseVector[Double]],
-    a: Array[DenseMatrix[Double]],
-    theta: DenseMatrix[Double]): Unit = {
+    /** Track these values just in case we need them **/
+    lazy val logPi: Array[DenseVector[Double]] = pi.map(pig => log(pig))
+    lazy val logA: Array[DenseMatrix[Double]] = a.map(ag => log(ag))
+    lazy val logTheta: DenseMatrix[Double] = log(theta)
+  }
 
+  /**
+    * Basically a class for memoization, that updates based on cached value.
+    */
+  class Term[T >: Null](update: (UATFMParams) => T) {
+    private var updated: Int = 0
+    private var value: T = null
+    def apply()(implicit params: UATFMParams): T = {
+      if(params.id != this.updated) {
+        this.updated = params.id
+        this.value = this.update(params)
+      }
+      this.value
+    }
+    def get: T = this.value
+  }
+
+  object Term {
+    def apply[T >: Null](update: (UATFMParams) => T): Term[T] = {
+      new Term[T](update)
+    }
+  }
+
+  val roots: Seq[Int] = trees.map(_.root.index)
+
+  implicit var params: UATFMParams = _
+
+  /** MODEL PARAMETERS **/
+  val pi: Array[DenseVector[Double]]    = (1 to G).map((i) => normalize(DenseVector.rand(K))).toArray // k x g
+  val a: Array[DenseMatrix[Double]]     = (1 to G).map((i) => normalize(DenseMatrix.rand(K, K), Axis._1, 1.0)).toArray // g x k x k
+  val theta: DenseMatrix[Double]        = normalize(DenseMatrix.rand(M, K), Axis._0, 1.0) // m x k
+
+  /** LATENT VARIABLE ESTIMATES **/
+  val q: DenseMatrix[Double]     = normalize(DenseMatrix.rand[Double](K, N), Axis._1, 1.0) // k x n
+  val r: DenseMatrix[Double]     = normalize(DenseMatrix.rand[Double](G, U), Axis._1, 1.0) // g x u
+  val qr: Array[DenseMatrix[Double]] = (1 to G).map((i) => DenseMatrix.zeros[Double](K, N)).toArray // g x k x n
+
+  /** USEFUL INTERMEDIATES **/
+  val responses: DenseVector[Double] = {
+    val m = DenseVector.zeros[Double](N)
+    dnodes.foreach{ case (node) =>
+      m(node.index) = node.children.length.toDouble
+    }
+
+    m
+  } // n x 1
+  // Reply matrix
+  val b: CSCMatrix[Double] = {
+    val builder = new CSCMatrix.Builder[Double](N, N)
+
+    dnodes.foreach((node) =>
+      node.children.foreach((child) =>
+        builder.add(node.index, child.index, 1d)
+      )
+    )
+
+    builder.result()
+  }   // n x n
+  /** Word occurrence matrix **/
+  val c: CSCMatrix[Double] = {
+    val builder = new CSCMatrix.Builder[Double](N, M)
+
+    corpus.zipWithIndex.foreach { case (document, index) =>
+      document.count.foreach { case (word, count) =>
+        builder.add(index, word, count.toDouble)
+      }
+    }
+
+    builder.result()
+  }   // n x m
+
+  protected def eStep(interval: Int): Unit = {
     import scala.util.control.Breaks._
 
     breakable {
@@ -100,16 +208,16 @@ sealed class InferenceSolver(val q: DenseMatrix[Double], val r: DenseMatrix[Doub
         println(s"    - Interval $i")
         // println(q(::, 1))
         // println(r(::, 1))
-        this.params = new UCTMParams(pi, a, theta)
+        this.params = new UATFMParams(pi, a, theta)
         // println(q(::, 1))
         println("      * document update")
         trees.par.foreach  (_.update())
         // println(r(::, 1))
         println("      * user update")
         unodes.par.foreach (_.update())
-        val derror = dnodes.map((dnode) => dnode.dist).reduce(_ + _) / dnodes.size
+        val derror = dnodes.map((dnode) => dnode.dist).sum / dnodes.size
         val dncert = sum(dnodes.map((dnode) => if(any(dnode.q_d.get :> 0.5)) 1 else 0))
-        val uerror = unodes.map((unode) => unode.dist).reduce(_ + _) / unodes.size
+        val uerror = unodes.map((unode) => unode.dist).sum / unodes.size
         val uncert = sum(unodes.map((unode) => if(any(unode.r_g.get :> 0.5)) 1 else 0))
         println(f"      error: document $derror%4e user $uerror%4e")
         println(f"      count: document $dncert%6d/${q.cols}%6d user $uncert%6d/${r.cols}%6d")
@@ -129,239 +237,7 @@ sealed class InferenceSolver(val q: DenseMatrix[Double], val r: DenseMatrix[Doub
     }
   }
 
-  ////////////////////////////////////////////////////////////////
-  // USER NODE
-  ////////////////////////////////////////////////////////////////
-  sealed class UNode(val user: Int) extends MathUtils {
-    var documents: Seq[DNode] = Seq()
-    val r_g = Term[DenseVector[Double]] { (params) =>
-      implicit val tmp = params
-      val n = documents.map { case (node) =>
-        if(node.isRoot)
-          DenseVector[Double]((0 until G).map((g) =>
-            log(params.pi(g) dot node.q_d())
-          ).toArray)
-        else
-          DenseVector[Double]((0 until G).map((g) =>
-            log(node.parent.q_d().t * params.a(g) * node.q_d())
-          ).toArray)
-      }.reduce(_ + _)
-      // Normalize
-      exp(n :- lse(n))
-    }
-
-    var dist: Double = G
-
-    def update() = {
-      val old_r = r_g.get
-      r(::, user) := r_g()
-      if(old_r != null)
-        dist = norm(old_r - r_g())
-    }
-  }
-
-  sealed class DNode(val document: Document, val index: Int) extends MathUtils {
-    var parent: DNode = null
-    var author: Int = -1
-    var children: Seq[DNode] = Seq()
-    lazy val siblings: Seq[DNode] = {
-      if(parent != null) {
-        parent.children.filter((child) => child != this)
-      }
-      else {
-        Seq()
-      }
-    }
-
-    def isRoot: Boolean = { this.parent == null }
-
-    /**
-      * Computes log probabilities for observing a set of words for each latent
-      * class.
-      */
-    val probW = Term[DenseVector[Double]] { (params) =>
-      implicit val tmp = params
-      val result =
-        if(document.words.length > 0)
-          document.count
-            .map { case (word, count) => params.logTheta(word, ::).t :* count.toDouble }
-            .reduce(_ + _)
-        else
-          DenseVector.zeros[Double](K)
-      result
-    }
-
-    val lambdaMsg = Term[DenseVector[Double]] { (params) =>
-      implicit val tmpparams = params
-      lse((0 until G).map((g) => lse(params.a(g), lambda()) :+ log(r(g, author))).toArray)
-    }
-
-    val lambda: Term[DenseVector[Double]] = Term[DenseVector[Double]] { (params) =>
-      implicit val tmp = params
-      // Lambda messages regarding likelihood of observing the document
-      val msg1 = probW()
-      // Lambda messages from children
-      val msg2 =
-        if(children.length > 0)
-          children
-            .map((child) => child.lambdaMsg())
-            .reduce(_ + _)
-        else
-          DenseVector.zeros[Double](K)
-      msg1 + msg2
-    }
-
-    val pi: Term[DenseVector[Double]] = Term[DenseVector[Double]] { (params) =>
-      implicit val tmp = params
-      if(parent == null) {
-        lse(params.logPi.zipWithIndex.map { case (pi_g, g) =>
-          pi_g :+ log(r(g, author))
-        })
-      }
-      else {
-        val msg1: DenseVector[Double] = parent.pi()
-        val msg2 =
-          if(siblings.length > 0) siblings.map((sibling) => sibling.lambdaMsg()).reduce(_ + _)
-          else DenseVector.zeros[Double](K)
-        msg1 + msg2
-      }
-    }
-
-    val q_d = Term[DenseVector[Double]] { (params) =>
-      implicit val tmpparams = params
-      val tmp = lambda() :+ pi()
-      exp(tmp :- lse(tmp))
-    }
-
-    var dist: Double = K
-
-    def update(): Unit = {
-      val old_q = q_d.get
-      q(::, index) := q_d()
-      if(old_q != null)
-        dist = norm(old_q - q_d())
-    }
-  }
-
-  sealed class DTree(val root: DNode) {
-    private def expand(node: DNode): Seq[DNode] = {
-      val children =
-        if(node.children != null) node.children.map((child) => expand(child)).flatten
-        else Seq()
-      Seq(node) ++ children
-    }
-    lazy val nodes: Seq[DNode] = expand(root)
-
-    def update(): Unit = {
-      nodes.foreach { (node) => node.update() }
-    }
-  }
-}
-
-class UCTopicModel(override val corpus: Corpus)
-    extends TopicModel(corpus) with MathUtils {
-  var G: Int = 5
-  def setNumUserGroups(numGroups: Int): this.type = {
-    this.G = numGroups
-    this
-  }
-
-  /** MODEL PARAMETERS **/
-  var pi: Array[DenseVector[Double]]    = null // k x g
-  var a: Array[DenseMatrix[Double]]     = null // g x k x k
-  var theta: DenseMatrix[Double]        = null // m x k
-  var scaledTheta: DenseMatrix[Double]  = null
-
-  /** LATENT VARIABLE ESTIMATES **/
-  private var q: DenseMatrix[Double]     = null // k x n
-  private var r: DenseMatrix[Double]     = null // g x u
-  private var qr: Array[DenseMatrix[Double]] = null // g x k x n
-
-  /** USEFUL INTERMEDIATES **/
-  private var responses: DenseVector[Double] = null // n x 1
-  // Reply matrix
-  private var b: CSCMatrix[Double]         = null   // n x n
-  // Word occurance matrix
-  private var c: CSCMatrix[Double]         = null   // n x m
-
-  private var inference: InferenceSolver = null
-  private var roots: Seq[Int] = null
-
-  private def buildResponses() = {
-    val N = corpus.numDocuments
-    val M = corpus.numWords
-
-    val m = DenseVector.zeros[Double](N)
-    inference.dnodes.foreach{ case (node) =>
-      m(node.index) = node.children.length.toDouble
-    }
-
-    m
-  }
-
-  private def buildB(): CSCMatrix[Double] = {
-    val N = corpus.numDocuments
-    val M = corpus.numWords
-
-    val builder = new CSCMatrix.Builder[Double](N, N)
-
-    inference.dnodes.foreach((node) =>
-      node.children.foreach((child) =>
-        builder.add(node.index, child.index, 1d)
-      )
-    )
-
-    builder.result()
-  }
-
-  private def buildC(): CSCMatrix[Double] = {
-    val N = corpus.numDocuments
-    val M = corpus.numWords
-
-    val builder = new CSCMatrix.Builder[Double](N, M)
-
-    corpus.documents.zipWithIndex.foreach { case (document, index) =>
-      document.count.foreach { case (word, count) =>
-        builder.add(index, word, count.toDouble)
-      }
-    }
-
-    builder.result()
-  }
-
-  protected def initialize(): Unit = {
-    val N = corpus.numDocuments
-    val M = corpus.numWords
-    val U = corpus.numUsers
-    println(s" $N documents")
-    println(s" $M words")
-    println(s" $U authors")
-
-    println(" Building param matrices...")
-    pi = (1 to G).map((i) => normalize(DenseVector.rand(K))).toArray
-    a = (1 to G).map((i) => normalize(DenseMatrix.rand(K, K), Axis._1, 1.0)).toArray
-    theta = normalize(DenseMatrix.rand(M, K), Axis._0, 1.0)
-
-    println(" Building expectation matrix...")
-    q = normalize(DenseMatrix.rand[Double](K, N), Axis._1, 1.0)
-    r = normalize(DenseMatrix.rand[Double](G, U), Axis._1, 1.0)
-    qr = (1 to G).map((i) => DenseMatrix.zeros[Double](K, N)).toArray
-
-    inference = new InferenceSolver(q, r, qr, K, G)(corpus)
-
-    println(" Populating auxillary matrices...")
-    responses = buildResponses()
-    b = buildB()
-    c = buildC()
-
-    roots = inference.roots
-  }
-
-  protected def expectation(interval: Int): Unit = {
-    inference.update(pi, a, theta)
-  }
-
-  protected def maximization(interval: Int): Unit = {
+  protected def mStep(interval: Int): Unit = {
     Seq(
       () => {
         // Pi Maximization
@@ -384,59 +260,136 @@ class UCTopicModel(override val corpus: Corpus)
     // println(s"   ~likelihood: ${inference.logLikelihood()}")
   }
 
-  def computeScaledTheta(): this.type = {
-    val N = corpus.numDocuments
-    val M = corpus.numWords
-    val p$z = normalize(sum(q, Axis._1), 1.0)
-    scaledTheta = normalize(theta(*, ::) :* p$z, Axis._1, 1.0)
-    this
-  }
-
-  override def train(): this.type = {
-    println("Initializing...")
-    initialize()
-    (1 to numIterations).foreach { (interval) =>
-      println(s" Interval: $interval")
-      println("  - E step")
-      expectation(interval)
-      println("  - M step")
-      maximization(interval)
+  ////////////////////////////////////////////////////////////////
+  // USER NODE
+  ////////////////////////////////////////////////////////////////
+  class UNode(val user: Int) {
+    var documents: Seq[DNode] = Seq()
+    val r_g: Term[DenseVector[Double]] = Term[DenseVector[Double]] { (params) =>
+      implicit val tmp = params
+      val n = documents.map { case (node) =>
+        if(node.isRoot)
+          DenseVector[Double]((0 until G).map((g) =>
+            log(params.pi(g) dot node.q_d())
+          ).toArray)
+        else
+          DenseVector[Double]((0 until G).map((g) =>
+            log(node.parent.q_d().t * params.a(g) * node.q_d())
+          ).toArray)
+      }.reduce(_ + _)
+      // Normalize
+      exp(n :- lse(n))
     }
-    computeScaledTheta()
-    this
+
+    var dist: Double = G
+
+    def update(): Unit = {
+      val old_r = r_g.get
+      r(::, user) := r_g()
+      if(old_r != null)
+        dist = norm(old_r - r_g())
+    }
   }
 
-  sealed case class UResult(id: Int, numPosts: Int, group: (Double, Int))
-  override def save(dir: String): Unit = {
-    val d = (if(!dir.endsWith("/")) dir + "/" else dir) + "uctm/"
-    new File(d).mkdirs()
 
-    (0 until G).foreach { (g) => csvwrite(new File(d + s"a_$g.mat"), a(g)) }
-    csvwrite(new File(d + "theta.mat"), theta)
-    csvwrite(new File(d + "scaled_theta.mat"), scaledTheta)
-    csvwrite(new File(d + "q.mat"), q)
+  ////////////////////////////////////////////////////////////////
+  // DOCUMENT NODE
+  ////////////////////////////////////////////////////////////////
+  class DNode(val document: Document, val index: Int) {
+    var parent: DNode = _
+    var author: Int = -1
+    var children: Seq[DNode] = Seq()
+    lazy val siblings: Seq[DNode] = {
+      if(parent != null) {
+        parent.children.filter((child) => child != this)
+      }
+      else {
+        Seq()
+      }
+    }
 
-    implicit val formats = Serialization.formats(NoTypeHints)
-    val M = corpus.numWords
-    val wordWeights: Map[Int, Map[String, Double]] = (0 until K).map { case (k) =>
-      k -> (0 until M).map { case (w) =>
-        // WordWeight(corpus.dictionary(w), scaledTheta(w, k))
-        corpus.words(w) -> scaledTheta(w, k)
-      }.toMap
-    }.toMap
-    Some(new PrintWriter(d + "word_weights.json"))
-      .foreach { (p) => p.write(write(wordWeights)); p.close() }
+    def isRoot: Boolean = { this.parent == null }
 
-    val users: List[UResult] = inference.unodes.map((unode) =>
-      UResult(unode.user, unode.documents.length, unode.r_g.get.toArray.zipWithIndex.maxBy(_._1))
-    ).toList
-    Some(new PrintWriter(d + "users.json"))
-      .foreach { (p) => p.write(write(users)); p.close() }
+    /**
+      * Computes log probabilities for observing a set of words for each latent
+      * class.
+      */
+    val probW: Term[DenseVector[Double]] = Term[DenseVector[Double]] { (params) =>
+      implicit val tmp: UATFMParams = params
+      val result =
+        if(document.words.length > 0)
+          document.count
+            .map { case (word, count) => params.logTheta(word, ::).t :* count.toDouble }
+            .reduce(_ + _)
+        else
+          DenseVector.zeros[Double](K)
+      result
+    }
 
-    corpus.save(d)
+    val lambdaMsg: Term[DenseVector[Double]] = Term[DenseVector[Double]] { (params) =>
+      implicit val tmpparams: UATFMParams = params
+      lse((0 until G).map((g) => lse(params.a(g), lambda()) :+ log(r(g, author))).toArray)
+    }
+
+    val lambda: Term[DenseVector[Double]] = Term[DenseVector[Double]] { (params) =>
+      implicit val tmp: UATFMParams = params
+      // Lambda messages regarding likelihood of observing the document
+      val msg1 = probW()
+      // Lambda messages from children
+      val msg2 =
+        if(children.nonEmpty)
+          children
+            .map((child) => child.lambdaMsg())
+            .reduce(_ + _)
+        else
+          DenseVector.zeros[Double](K)
+      msg1 + msg2
+    }
+
+    val pi: Term[DenseVector[Double]] = Term[DenseVector[Double]] { (params) =>
+      implicit val tmp: UATFMParams = params
+      if(parent == null) {
+        lse(params.logPi.zipWithIndex.map { case (pi_g, g) =>
+          pi_g :+ log(r(g, author))
+        })
+      }
+      else {
+        val msg1: DenseVector[Double] = parent.pi()
+        val msg2 =
+          if(siblings.nonEmpty) siblings.map((sibling) => sibling.lambdaMsg()).reduce(_ + _)
+          else DenseVector.zeros[Double](K)
+        msg1 + msg2
+      }
+    }
+
+    val q_d: Term[DenseVector[Double]] = Term[DenseVector[Double]] { (params) =>
+      implicit val tmpparams: UATFMParams = params
+      val tmp = lambda() :+ pi()
+      exp(tmp :- lse(tmp))
+    }
+
+    var dist: Double = K
+
+    def update(): Unit = {
+      val old_q = q_d.get
+      q(::, index) := q_d()
+      if(old_q != null)
+        dist = norm(old_q - q_d())
+    }
   }
-}
 
-object UserAwareTopicFlowModel {
-  def apply(corpus: Corpus) = new UCTopicModel(corpus)
+  class DTree(val root: DNode) {
+    private def expand(node: DNode): Seq[DNode] = {
+      val children =
+        if(node.children != null) node.children.flatMap((child) => expand(child))
+        else Seq()
+      Seq(node) ++ children
+    }
+    lazy val nodes: Seq[DNode] = expand(root)
+
+    def update(): Unit = {
+      nodes.foreach { (node) => node.update() }
+    }
+  }
+
 }

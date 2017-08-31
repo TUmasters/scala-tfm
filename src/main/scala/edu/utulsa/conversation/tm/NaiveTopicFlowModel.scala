@@ -9,40 +9,74 @@ import org.json4s.native.Serialization
 import org.json4s.native.Serialization.write
 import java.io.PrintWriter
 
-import edu.utulsa.conversation.text.{Corpus, Document}
+import edu.utulsa.conversation.text.{Corpus, Dictionary, Document}
 
+class NaiveTopicFlowModel
+(
+  override val numTopics: Int,
+  override val words: Dictionary,
+  override val documentInfo: List[DocumentTopic],
+  val pi: DenseVector[Double],
+  val a: DenseMatrix[Double],
+  val theta: DenseMatrix[Double]
+) extends TopicModel(numTopics, words, documentInfo) {
+  override def saveModel(dir: File): Unit = {
+    import MathUtils.csvwritevec
+    dir.mkdirs()
+    csvwritevec(new File(dir + "/pi.mat"), pi)
+    csvwrite(new File(dir + "/a.mat"), a)
+    csvwrite(new File(dir + "/theta.mat"), theta)
+  }
+
+  override def likelihood(corpus: Corpus): Double = ???
+}
+
+object NaiveTopicFlowModel {
+  def train
+  (
+    corpus: Corpus,
+    numTopics: Int,
+    numIterations: Int = 10
+  ): NaiveTopicFlowModel = {
+    new NTFMOptimizer(corpus, numTopics, numIterations)
+      .train()
+  }
+  def load(dir: String): NaiveTopicFlowModel = ???
+}
 
 class NTFMOptimizer
 (
   override val corpus: Corpus,
   override val numTopics: Int,
   val numIterations: Int
-) extends TMOptimizer[NaiveTopicFlowModel](corpus, numTopics) with MathUtils {
+) extends TMOptimizer[NaiveTopicFlowModel](corpus, numTopics) {
+  import MathUtils._
 
   val N = corpus.all.size
   val M = corpus.words.size
 
   /** MODEL PARAMETERS **/
   val pi: DenseVector[Double]          = normalize(DenseVector.rand[Double](K)) // k x 1
-  var logPi: DenseVector[Double]       = log(pi)
-  var a: DenseMatrix[Double]           = normalize(DenseMatrix.rand(K, K), Axis._1, 1.0) // k x k
-  var logA: DenseMatrix[Double]        = log(a)
-  var theta: DenseMatrix[Double]       = normalize(DenseMatrix.rand(M, K), Axis._0, 1.0) // m x k
-  var logTheta: DenseMatrix[Double]    = log(theta)
+  val logPi: DenseVector[Double]       = log(pi)
+  val a: DenseMatrix[Double]           = normalize(DenseMatrix.rand(K, K), Axis._1, 1.0) // k x k
+  val logA: DenseMatrix[Double]        = log(a)
+  val theta: DenseMatrix[Double]       = normalize(DenseMatrix.rand(M, K), Axis._0, 1.0) // m x k
+  val logTheta: DenseMatrix[Double]    = log(theta)
 
   /** LATENT VARIABLE ESTIMATES **/
-  private var q: DenseMatrix[Double]   = DenseMatrix.zeros[Double](K, N) // k x n
+  private val q: DenseMatrix[Double]   = DenseMatrix.zeros[Double](K, N) // k x n
 
+  println(" Populating responses vector...")
   /** USEFUL INTERMEDIATES **/
   private val responses: DenseVector[Double] = {
     val m = DenseVector.zeros[Double](N)
     corpus.replies.zipWithIndex.foreach{ case (document, index) =>
       m(index) = document.replies.length.toDouble
     }
-
     m
   }
 
+  println(" Generating conversation matrix...")
   private val b: CSCMatrix[Double] = {
     val builder = new CSCMatrix.Builder[Double](N, N)
 
@@ -55,6 +89,7 @@ class NTFMOptimizer
     builder.result()
   }
 
+  println(" Generating word occurrence matrix...")
   private val c: CSCMatrix[Double] = {
     val builder = new CSCMatrix.Builder[Double](N, M)
 
@@ -68,15 +103,20 @@ class NTFMOptimizer
   }   // n x m
 
   override def train(): NaiveTopicFlowModel = {
-    println("Initializing...")
-      (1 to numIterations).foreach { (interval) =>
-        println(s" Interval: $interval")
-        println("  - E step")
-        eStep(interval)
-        println("  - M step")
-        mStep(interval)
-      }
-    new NaiveTopicFlowModel(numTopics, pi, a, theta)
+    (1 to numIterations).foreach { (interval) =>
+      println(s" Interval: $interval")
+      println("  - E step")
+      eStep(interval)
+      println("  - M step")
+      mStep(interval)
+    }
+    println(" Collecting results per document...")
+    val d: List[DocumentTopic] = nodes.map(node => {
+      val v: Array[Double] = q(::, node.index).toArray
+      DocumentTopic(node.document.id, v.zipWithIndex.map { case (p, i) => TPair(p, i) }.filter(_.p > 0.1).sortBy(-_.p).toList)
+    }).toList
+    println(" Done.")
+    new NaiveTopicFlowModel(numTopics, corpus.words, d, pi, a, theta)
   }
 
   val (trees: Seq[DTree], nodes: Seq[DNode]) = {
@@ -100,7 +140,7 @@ class NTFMOptimizer
 
   class Param[T >: Null]() {
     var updated: Int = 0
-    var value: T = null
+    var value: T = _
 
     def apply(): T = value
 
@@ -112,8 +152,8 @@ class NTFMOptimizer
     }
   }
 
-  sealed class DNode(val document: Document, val index: Int) extends MathUtils {
-    var parent: DNode = null
+  sealed class DNode(val document: Document, val index: Int) {
+    var parent: DNode = _
     var children: Seq[DNode] = Seq()
     lazy val siblings: Seq[DNode] = {
       if (parent != null) {
@@ -135,7 +175,7 @@ class NTFMOptimizer
     def probW: DenseVector[Double] = {
       pprobW := {
         val result =
-          if (document.words.length > 0)
+          if (document.words.nonEmpty)
             document.count
               .map { case (word, count) => logTheta(word, ::).t :* count.toDouble }
               .reduce(_ + _)
@@ -246,47 +286,4 @@ class NTFMOptimizer
       }
     ).par.foreach { case (step) => step() }
   }
-}
-
-class NaiveTopicFlowModel
-(
-  override val numTopics: Int,
-  val pi: DenseVector[Double],
-  val a: DenseMatrix[Double],
-  val theta: DenseMatrix[Double]
-) extends TopicModel(numTopics) {
-  override def save(dir: File): Unit = {
-    dir.mkdirs()
-//    new File(dir).mkdirs()
-//    csvwrite(new File(dir.toString + "pi.mat"), pi)
-    csvwrite(new File(dir.toString + "a.mat"), a)
-    csvwrite(new File(dir.toString + "theta.mat"), theta)
-//    csvwrite(new File(d + "scaled_theta.mat"), scaledTheta)
-//    csvwrite(new File(d + "q.mat"), q)
-
-    implicit val formats: AnyRef with Formats {
-      val typeHints: TypeHints
-
-      val dateFormat: DateFormat
-    } = Serialization.formats(NoTypeHints)
-    val M = corpus.numWords
-    val wordWeights: Map[Int, Map[String, Double]] = (0 until numTopics).map { case (k) =>
-      k -> (0 until M).map { case (w) =>
-        corpus.dict(w) -> scaledTheta(w, k)
-      }.toMap
-    }.toMap
-
-    Some(new PrintWriter(d + "word_weights.json"))
-      .foreach { (p) => p.write(write(wordWeights)); p.close() }
-
-    corpus.save(d)
-  }
-
-
-  override def likelihood(corpus: Corpus): Unit = ???
-}
-
-object NaiveTopicFlowModel {
-  def train(corpus: Corpus) = ???
-  def load(dir: String): NaiveTopicFlowModel = ???
 }

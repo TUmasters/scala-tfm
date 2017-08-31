@@ -3,28 +3,80 @@ package edu.utulsa.conversation.tm
 import breeze.linalg._
 import breeze.numerics.{abs, exp, log, pow}
 import breeze.optimize._
-import org.json4s._
-import org.json4s.native.JsonMethods._
-import org.json4s.native.Serialization
-import org.json4s.native.Serialization.write
 import java.io.File
-import java.io.PrintWriter
 
-import edu.utulsa.conversation.text.{Corpus, Document}
+import edu.utulsa.conversation.text.{Corpus, Dictionary, Document}
 
 import scala.util.control.Breaks._
 
-class MMCTMOptimize(val N: Int, val M: Int, val K: Int, val sigma: DenseMatrix[Double], val a: DenseMatrix[Double], val theta: DenseMatrix[Double])(val corpus: Corpus) extends MathUtils {
-  var nodes: Seq[DNode] = null
-  var roots: Seq[DNode] = null
-  var trees: Seq[DTree] = null
-  var replies: Seq[DNode] = null
+class MixedMembershipTopicFlowModel
+(
+  override val numTopics: Int,
+  override val words: Dictionary,
+  override val documentInfo: List[DocumentTopic],
+  val sigma: DenseMatrix[Double],
+  val a: DenseMatrix[Double],
+  val theta: DenseMatrix[Double]
+) extends TopicModel(numTopics, words, documentInfo) {
+  override protected def saveModel(dir: File): Unit = {
+    csvwrite(new File(dir + "/a.mat"), a)
+    csvwrite(new File(dir + "/sigma.mat"), sigma)
+    csvwrite(new File(dir + "/theta.mat"), theta)
+  }
+
+  override def likelihood(corpus: Corpus): Double = ???
+}
+
+object MixedMembershipTopicFlowModel {
+  def train(corpus: Corpus, numTopics: Int, numIterations: Int): MixedMembershipTopicFlowModel = ???
+}
+
+sealed class MMTFMOptimizer
+(
+  override val corpus: Corpus,
+  override val numTopics: Int,
+  val sigmaFactor: Double = 4.0
+) extends TMOptimizer[MixedMembershipTopicFlowModel](corpus, numTopics) {
+
+  import MathUtils._
+
+  override def train(): MixedMembershipTopicFlowModel = ???
+
+  val N = corpus.size
+  val M = corpus.words.size
+
+  // Parameters
+  private val a: DenseMatrix[Double] = DenseMatrix.zeros[Double](K, K) // k x k
+  private val sigma: DenseMatrix[Double] = normalize(DenseMatrix.rand[Double](K, M), Axis._1, 1.0) // k x k
+  private val theta: DenseMatrix[Double] = DenseMatrix.zeros[Double](K, K) // k x w
+
+  val nodes: Seq[DNode] = {
+    val m = corpus.map { case (document: Document) =>
+      document -> new DNode(document)
+    }.toMap
+    m.foreach { case (document, node) =>
+      if(document.parent.isDefined)
+        node.parent = m(document.parent.get)
+      if(document.replies != null && document.replies.nonEmpty)
+        node.children = document.replies.map(m)
+    }
+    m.values.toSeq
+  }
+  val roots: Seq[DNode] = nodes.filter(_.parent == null)
+  val trees: Seq[DTree] = roots.map(new DTree(_))
+  val replies: Seq[DNode] = nodes.filter(_.parent != null)
 
   val invSigma = DenseMatrix.zeros[Double](K, K)
   val sigmaA = DenseMatrix.zeros[Double](K, K)
   val I = DenseMatrix.eye[Double](K)
   val P = I :- (DenseMatrix.ones[Double](K, K) :/ K.toDouble)
-  class DNode(val index: Int, val document: Document) {
+
+  /**
+    * Internal object to track topic distribution for individual documents.
+    * @param document Corresponding document object.
+    */
+  class DNode(val document: Document) {
+    def index: Int = document.index
     var parent: DNode = null
     var children: Seq[DNode] = Seq()
 
@@ -38,14 +90,10 @@ class MMCTMOptimize(val N: Int, val M: Int, val K: Int, val sigma: DenseMatrix[D
     }
     def updateQ() = {
       document.count.foreach { case (w, c) =>
-        val lq = (log(x) :+ log(theta(::, w)))
+        val lq = log(x) :+ log(theta(::, w))
         q(w) := normalize(exp(lq :- lse(lq)) :+ 1e-4, 1d)
       }
     }
-
-    // val sumQ: Term[DenseVector[Double]] = Term {
-    //   q().map(_._2).fold(DenseVector.zeros[Double](K))(_ + _)
-    // }
 
     def f(y: DenseVector[Double] = this.x): Double = {
       val p1: Double =
@@ -82,14 +130,6 @@ class MMCTMOptimize(val N: Int, val M: Int, val K: Int, val sigma: DenseMatrix[D
     def f(x: DenseVector[Double], q: DenseVector[Double], b: DenseVector[Double], H: DenseMatrix[Double]): Double = {
       (-sum(q :* log(x))) :+ (x.t * H * x :* 0.5) :- b.t * x
     }
-
-    // def alphaGrad(alpha: Double, q: DenseVector[Double], b: DenseVector[Double], A: DenseMatrix[Double], d: DenseVector[Double], x: DenseVector[Double]): Double = {
-    //   sum((q :* d) :/ (x :+ (alpha :* d))) + (b dot d) - (d.t * A * x) - (d.t * A * d * alpha)
-    // }
-
-    // def alphaHess(alpha: Double, q: DenseVector[Double], d: DenseVector[Double], dAd: Double): Double = {
-    //   sum(q :* pow(d :/ (x :+ (alpha :* d)), 2d)) :- dAd
-    // }
 
     def grad(y: DenseVector[Double], q: DenseVector[Double], b: DenseVector[Double], H: DenseMatrix[Double]): DenseVector[Double] = {
       - (q :/ y) :+ (H * y) :- b
@@ -256,7 +296,6 @@ class MMCTMOptimize(val N: Int, val M: Int, val K: Int, val sigma: DenseMatrix[D
             size += 1
           })
         }
-        // if(verbose) this.print()
         level.reverse.tail.foreach { case (nodes: Seq[DNode]) =>
           nodes.foreach((node) => {
             error += node.updateX(withConv, withConv)
@@ -264,8 +303,6 @@ class MMCTMOptimize(val N: Int, val M: Int, val K: Int, val sigma: DenseMatrix[D
           })
         }
         error = error / size
-        // println(s"     error (${root.index}): $error")
-        // if(verbose) this.print()
         iter = iter + 1
       }
     }
@@ -274,7 +311,7 @@ class MMCTMOptimize(val N: Int, val M: Int, val K: Int, val sigma: DenseMatrix[D
       level.zipWithIndex.foreach { case (nodes, index) =>
         nodes.foreach((node) =>
           println({
-            val (p, topic) = node.x.toArray.zipWithIndex.sortBy(-_._1).head
+            val (p, topic) = node.x.toArray.zipWithIndex.minBy(-_._1)
             val pc = 100*p
             val v = "[ " + node.x.toArray.map((d) => f"$d%2.3f ").mkString + "]"
             f"$v"
@@ -296,8 +333,6 @@ class MMCTMOptimize(val N: Int, val M: Int, val K: Int, val sigma: DenseMatrix[D
     trees.zipWithIndex.foreach { case (tree, index) =>
       tree.updateX(withConv)
     }
-    // val f = nodes.map(_.f()).reduce(_ + _)
-    // println(f"  f(X) = $f%5.8f")
   }
 
   // Can update this once
@@ -312,7 +347,6 @@ class MMCTMOptimize(val N: Int, val M: Int, val K: Int, val sigma: DenseMatrix[D
     theta := normalize(normalize(theta, Axis._1, 1.0) :+ 1e-8, Axis._1, 1.0)
   }
 
-  var sigmaFactor: Double = 1.0
   // Need to loop these steps
   def sigmaStep() = {
     println("   sigma")
@@ -334,8 +368,7 @@ class MMCTMOptimize(val N: Int, val M: Int, val K: Int, val sigma: DenseMatrix[D
       .map((node) => {
         val d = node.x - a * node.parent.x
         d dot d
-      })
-      .reduce(_ + _)
+      }).sum
     sigma := diag(DenseVector.fill(K) { s / (sigmaFactor * replies.length.toDouble) })
     // Third method: static value
     // sigma := DenseMatrix.eye[Double](K) :/ 3.5
@@ -348,28 +381,20 @@ class MMCTMOptimize(val N: Int, val M: Int, val K: Int, val sigma: DenseMatrix[D
     val oldA = a.copy
     val X = replies.map((node) => node.parent.x * node.parent.x.t).reduce(_ + _)
     val Y = replies.map((node) => node.x * node.parent.x.t).reduce(_ + _)
-    a := ((X.t) \ (Y.t)).t
-    // println("A (unnormalized)")
-    // println(a)
+    a := (X.t \ Y.t).t
     disp(diag(a))
-    // a := normalize(normalize(abs(a), Axis._0, 1.0) :+ 1e-8, Axis._0, 1.0)
     a := a(::, *).map { case (vec) =>
       val add = -min(vec)
       normalize(vec :+ 1e-8 :+ (if(add > 0) add else 0d), 1d)
     }
     val error = sum(pow(oldA - a, 2.0))
-    println(s"     error: $error")
-    // println("A (corrected)")
-    // a(*, ::).foreach{ case (row) =>
-    //   println("[ " + row.toArray.map((d) => f"$d%2.3f ").mkString + "]")
-    // }
-    // println(rank(a))
+//    println(s"     error: $error")
   }
 
   var inPLSA: Boolean = false
   def plsa(numIntervals: Int, updateTheta: Boolean = true) = {
     inPLSA = true
-    for(i <- (1 to numIntervals)) {
+    for(i <- 1 to numIntervals) {
       println(s"  Step $i")
       qStep()
       xStep(false)
@@ -405,158 +430,4 @@ class MMCTMOptimize(val N: Int, val M: Int, val K: Int, val sigma: DenseMatrix[D
     invSigma := inv(sigma)
     sigmaA := sigma \ a
   }
-
-  def initialize() = {
-    println("Creating temp param matrices")
-    val nmap = corpus.documents.zipWithIndex.map { case (document: Document, index: Int) =>
-      document -> new DNode(index, document)
-    }.toMap
-    nmap.foreach { case (document, node) =>
-      if(document.parent != null)
-        node.parent = nmap(document.parent)
-      if(document.children != null && document.children.length > 0)
-        node.children = document.children.map(nmap(_))
-    }
-    nodes = nmap.map(_._2).toSeq
-    roots = nodes.filter(_.parent == null)
-    trees = roots.map(new DTree(_))
-    replies = nodes.filter(_.parent != null)
-    println(s"   ${roots.length} conversations")
-    println(s"   ${replies.length} replies")
-  }
-}
-
-
-/****************************************************************
- * MIXED MEMBERSHIP CONVERSATIONAL TOPIC MODEL
- ****************************************************************/
-
-class MMCTopicModel(override val corpus: Corpus, saveDir: String) extends TopicModel(corpus) with MathUtils {
-  private val dsave = if(!saveDir.endsWith("/")) saveDir + "/" else saveDir
-  private var N: Int = corpus.numDocuments
-  private var M: Int = corpus.numWords
-
-  // Parameters
-  // private var xmat: DenseMatrix[Double] = null   // k x n
-  private var sigma: DenseMatrix[Double] = null  // k x k
-  private var a: DenseMatrix[Double] = null      // k x k
-  private var theta: DenseMatrix[Double] = null  // k x w
-
-  private var sigmaFactor: Double = 4.0
-  def setSigmaFactor(sigmaFactorValue: Double): this.type = {
-    this.sigmaFactor = sigmaFactorValue
-    this
-  }
-
-  private def randPDM(k: Int): DenseMatrix[Double] = {
-    val a = lowerTriangular(DenseMatrix.rand[Double](k, k))
-    a * a.t + diag(DenseVector.rand[Double](k) :* 10.0)
-  }
-
-  var optim: MMCTMOptimize = null
-  private def maybeLoadPLSA(): Boolean = {
-    val thetaFile = new File(dsave + "plsa/theta.mat")
-    if(thetaFile.exists()) {
-      println("Reloading PLSA...")
-      val newTheta = csvread(thetaFile)
-      if(theta.rows == newTheta.rows) {
-        optim.plsa(15, updateTheta=false)
-        true
-      }
-      else
-        false
-    }
-    else {
-      false
-    }
-  }
-  private def initialize() = {
-    println(s" $N documents")
-    println(s" $M words")
-    println(s" $K topics")
-
-    println(" Building param matrices...")
-    println(" A")
-    a = DenseMatrix.zeros[Double](K, K)
-    println(" theta")
-    theta = normalize(DenseMatrix.rand[Double](K, M), Axis._1, 1.0)
-    // println(" xmat")
-    // xmat = normalize(DenseMatrix.rand[Double](K, N), Axis._0, 1.0)
-    println(" sigma")
-    // sigma = randPDM(K)
-    sigma = DenseMatrix.zeros[Double](K, K)
-
-    println(" optimization")
-    optim = new MMCTMOptimize(N, M, K, sigma, a, theta)(corpus: Corpus)
-    optim.initialize()
-    optim.sigmaFactor = this.sigmaFactor
-    println("Done.")
-  }
-
-  def train(): this.type = {
-    println("Training")
-    initialize()
-    // if(!maybeLoadPLSA() || numIterations <= 0) {
-      println("PLSA pre-step")
-      optim.plsa(30)
-      savePLSA(dsave + "plsa/")
-      saveInfo(dsave + "plsa/")
-    // }
-    println("Main optimization step")
-    optim.aStep()
-    optim.sigmaStep()
-    for(i <- (1 to numIterations)) {
-      println(s"Step $i")
-      optim.step(i)
-    }
-    this
-  }
-
-  sealed case class DTopicResult(documents: Map[String, Array[Double]], numTopics: Int)
-  sealed case class DWordResult(documents: Map[String, List[WResult]], numTopics: Int)
-  sealed case class WResult(w: String, t: Int, p: Double)
-  private def savePLSA(dir: String): Unit = {
-    new File(dir).mkdirs()
-    csvwrite(new File(dir + "theta.mat"), theta)
-  }
-  private def saveInfo(dir: String): Unit = {
-    implicit val formats = Serialization.formats(NoTypeHints)
-    val topics = DTopicResult(
-      optim.nodes.map { case (node) =>
-          node.document.id -> node.x.toArray
-      }.toMap,
-      K
-    )
-    val words= DWordResult(
-      optim.nodes.map { case (node) =>
-        node.document.id -> node.q.map {
-          case (i, w) =>
-            w.toArray.zipWithIndex.sortBy(-_._1).take(1)
-              .map((t) => WResult(corpus.words(i), t._2, t._1)).head
-        }.toList
-      }.toMap,
-      K
-    )
-
-    Some(new PrintWriter(dir + "documents.json"))
-      .foreach { (p) => p.write(write(topics)); p.close() }
-    Some(new PrintWriter(dir + "words.json"))
-      .foreach { (p) => p.write(write(words)); p.close() }
-    corpus.save(dir)
-  }
-
-  def save(dir: String): Unit = {
-    val d = dsave + "mmctm/"
-    new File(d).mkdirs()
-    savePLSA(d)
-    csvwrite(new File(d + "a.mat"), a)
-    csvwrite(new File(d + "theta.mat"), theta)
-    csvwrite(new File(d + "sigma.mat"), sigma)
-    // csvwrite(new File(d + "x.mat"), xmat)
-    saveInfo(d)
-  }
-}
-
-object MMCTopicModel {
-  def apply(corpus: Corpus, saveDir: String) = new MMCTopicModel(corpus, saveDir)
 }

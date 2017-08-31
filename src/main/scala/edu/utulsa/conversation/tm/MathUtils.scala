@@ -1,11 +1,14 @@
 package edu.utulsa.conversation.tm
 
+import java.io.{File, PrintWriter}
+
 import breeze.linalg._
-import breeze.numerics.{log, log1p, exp, pow}
+import breeze.numerics.{exp, log, log1p, pow}
+
 import scala.util.Random
 import scala.util.control.Breaks._
 
-trait MathUtils {
+object MathUtils {
 
   val rand = new Random()
 
@@ -48,5 +51,24 @@ trait MathUtils {
       disp(row)
     }
     println("]")
+  }
+
+  def randPDM(k: Int): DenseMatrix[Double] = {
+    val a = lowerTriangular(DenseMatrix.rand[Double](k, k))
+    a * a.t + diag(DenseVector.rand[Double](k) :* 10.0)
+  }
+
+  def csvwritevec(file: File, x: DenseVector[Double]): Unit = {
+    file.createNewFile()
+    Some(new PrintWriter(file)).foreach { (p) =>
+      x.foreach((xi) => p.write(f"$xi%f\n"))
+      p.close()
+    }
+  }
+
+  def csvreadvec(file: File): DenseVector[Double] = {
+    val buffer = io.Source.fromFile(file)
+    val values: Seq[Double] = buffer.getLines.map(_.toDouble).toSeq
+    DenseVector(values: _*)
   }
 }
