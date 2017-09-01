@@ -1,16 +1,12 @@
-package edu.utulsa.conversation.driver
+package edu.utulsa.conversation.cli
 
 import edu.utulsa.conversation.tm._
-import org.json4s._
-import org.json4s.native.JsonMethods._
-import org.json4s.native.Serialization
-import org.json4s.native.Serialization.write
 import java.io.File
+
+import edu.utulsa.conversation.text.{Corpus, DocumentData}
+
 import scala.reflect.runtime.universe._
-
 import scala.collection.mutable
-
-case class JSONDocument(id: String, words: List[String], parent: String, author: String)
 
 object Driver {
   private var option: Map[Argument[_], _] = Map()
@@ -57,11 +53,11 @@ object Driver {
   private val outputDir = new Argument[String](
     """Output directory. If empty, output is placed in the directory of the input file.""",
     "--output-dir",
-    { Some(new File($(inputFile)).getParent.toString) }
+    { Some(new File($(inputFile)).getParent + "/" + $(algorithm)) }
   )
   val algorithms: Seq[String] = Seq("lda", "ntfm", "uatfm", "mmtfm")
   private val algorithm = new Argument[String](
-    """Algorithm to use. Results are saved to a unique subdirectory.""",
+    s"""Algorithm to use. Results are saved to a unique subdirectory. Choices: $algorithms""",
     "--algorithm",
     Some("mmtfm"),
     (arg: String) => algorithms contains arg
@@ -72,16 +68,28 @@ object Driver {
     Some(10),
     (arg: Int) => arg > 0
   )
+  private val numUserGroups = new Argument[Int](
+    """(For UATFM only) Number of user groups to train on.""",
+    "--num-user-groups",
+    Some(10),
+    (arg: Int) => arg > 0
+  )
   private val numIterations = new Argument[Int](
     """Number of iterations to run algorithm for.""",
     "--num-iterations",
     Some(100),
     (arg: Int) => arg > 0
   )
-  private val numUserGroups = new Argument[Int](
-    """(For UATFM only) Number of user groups to train on.""",
-    "--num-user-groups",
+  private val maxEIterations = new Argument[Int](
+    """Maximum number of iterations to run the E-step of the UATFM for.""",
+    "--max-e-iterations",
     Some(10),
+    (arg: Int) => arg > 0
+  )
+  private val maxAlphaIterations = new Argument[Int](
+    """Maximum number of iterations to run the alpha maximization procedure for LDA.""",
+    "--max-alpha-iterations",
+    Some(15),
     (arg: Int) => arg > 0
   )
 
@@ -115,47 +123,26 @@ object Driver {
       optional.values.map((option) => s"  ${option.prefix}\n    ${option.description}\n").toList).mkString
   }
 
-  def load(filename: String): List[JSONDocument] = {
-    println("Loading JSON data...")
-    implicit val formats = DefaultFormats
-    val content = scala.io.Source.fromFile(filename).mkString
-    val json = parse(content)
-    json.extract[List[JSONDocument]]
-  }
-
-  def process(documents: Seq[JSONDocument]): Corpus = {
-    println("Processing data...")
-    println(" - Getting content")
-    val data = documents
-      .map((document) =>
-        document.id -> DocumentData(document.id, document.words, document.parent, document.author))
-      .toMap
-    println(" - Generating corpus")
-    val corpus = Corpus.build(data)
-    corpus
+  def loadCorpus() = {
+    Corpus.load(new File($(inputFile)))
   }
 
   def train(corpus: Corpus): TopicModel = {
-    println("Training model...")
-    val model = ($(algorithm) match {
+    val model: TopicModel = $(algorithm) match {
       case _ if $(algorithm) == "lda" =>
-        LDA(corpus)
+        LatentDirichletAllocation.train(corpus, $(numTopics), $(numIterations), $(maxAlphaIterations))
       case _ if $(algorithm) == "ntfm" =>
-        CTopicModel(corpus)
+        NaiveTopicFlowModel.train(corpus, $(numTopics), $(numIterations))
       case _ if $(algorithm) == "uatfm" =>
-        UCTopicModel(corpus)
-          .setNumUserGroups($(numUserGroups))
+        UserAwareTopicFlowModel.train(corpus, $(numTopics), $(numUserGroups), $(numIterations), $(maxEIterations))
       case _ if $(algorithm) == "mmtfm" =>
-        MMCTopicModel(corpus, $(outputDir))
-    }).setK($(numTopics))
-      .setNumIterations($(numIterations))
-    model.train()
+        MixedMembershipTopicFlowModel.train(corpus, $(numTopics), $(numIterations))
+    }
     model
   }
 
-  def loadCorpus(inputFile: String) = {
-    val documents = load(inputFile)
-    process(documents)
+  def save(model: TopicModel): Unit = {
+    model.save(new File($(outputDir)))
   }
 
   def main(args: Array[String]): Unit = {
@@ -165,8 +152,13 @@ object Driver {
       println(help)
     else {
       option = parseArguments(args.toList)
-      val corpus = loadCorpus($(inputFile))
-      train(corpus)
+      println("Loading corpus...")
+      val corpus = loadCorpus()
+      println("Training model...")
+      val model = train(corpus)
+      println("Saving model...")
+      save(model)
+      println("Done.")
     }
   }
 }

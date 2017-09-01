@@ -1,57 +1,54 @@
 package edu.utulsa.conversation.tm
 
+import java.io.{File, PrintWriter}
+
 import breeze.linalg._
 import breeze.numerics.log
+import edu.utulsa.conversation.text.{Corpus, Dictionary}
 
-abstract class TopicModel(val corpus: Corpus) extends TopicUtils {
-  def train(): this.type
-  def save(dir: String): Unit
+case class TPair(p: Double, topic: Int)
+case class DocumentTopic(id: String, topics: List[TPair])
 
-  protected var K: Int = 10
-  def setK(k: Int): this.type = {
-    this.K = k
-    this
+abstract class TopicModel
+(
+  val numTopics: Int,
+  val words: Dictionary,
+  val documentInfo: Map[String, List[TPair]],
+  val wordInfo: Map[String, List[TPair]]
+) {
+
+  def save(dir: File): Unit = {
+    if(dir.exists())
+      dir.delete()
+    dir.mkdirs()
+    saveModel(dir)
+    saveData(dir)
   }
 
-  protected var numIterations: Int = 100
-  def setNumIterations(numIterations: Int): this.type = {
-    this.numIterations = numIterations
-    this
-  }
-  // def topicDist(topic: Int): TopicDist
-  // def documentDist(document: Int): DocumentDist
-  // def documentDists: Seq[DocumentDist] =
-  //   (0 until corpus.documents.length).map((document) => documentDist(document))
-  // class DocumentDist(val document: Int, val topicDist: DenseVector[Double]) {
-  //   type TopicProb = (Int, Double)
-  //   lazy val best: TopicProb = {
-  //     val the = topicDist.toArray.zipWithIndex
-  //       .reduce((a, b) => if(a._1 > b._1) a else b)
-  //     (the._2, the._1)
-  //   }
-  //   lazy val dist: Seq[TopicProb] = {
-  //     topicDist.toArray.zipWithIndex
-  //       .sortBy(-_._1)
-  //       .map { case (p,i) => (i,p) }
-  //   }
-  // }
+  def params: Map[String, AnyVal] = Map(
+    "num-topics" -> numTopics,
+    "num-words" -> words.size
+  )
 
-  // class TopicDist(val topic: Int, val wordDist: DenseVector[Double], val scaledDist: DenseVector[Double]) {
-  //   type WordProb = (Double, Int)
-  //   def likely(n: Int): Seq[WordProb] = {
-  //     wordDist.toArray.zipWithIndex
-  //       .sortBy(-_._1)
-  //       .take(n)
-  //   }
-  //   def unique(n: Int): Array[WordProb] = {
-  //     scaledDist.toArray.zipWithIndex
-  //       .sortBy(-_._1)
-  //       .take(n)
-  //   }
-  //   def scaled(n: Int): Array[WordProb] = {
-  //     (scaledDist :* log(wordDist)).toArray.zipWithIndex
-  //       .sortBy(-_._1)
-  //       .take(n)
-  //   }
-  // }
+  def saveData(dir: File): Unit = {
+    writeJson(new File(dir + "/document-topics.json"), documentInfo)
+    writeJson(new File(dir + "/word-topics.json"), wordInfo)
+    writeJson(new File(dir + "/params.json"), params)
+  }
+
+  protected def writeJson[A <: AnyRef](file: File, a: A): Unit = {
+    import org.json4s._
+    import org.json4s.native.Serialization
+    import org.json4s.native.Serialization.writePretty
+
+    implicit val formats = Serialization.formats(NoTypeHints)
+
+    file.createNewFile()
+    Some(new PrintWriter(file))
+      .foreach { (p) => p.write(writePretty(a)); p.close() }
+  }
+
+  protected def saveModel(dir: File): Unit
+
+  def likelihood(corpus: Corpus): Double
 }
