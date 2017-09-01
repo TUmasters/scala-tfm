@@ -10,15 +10,18 @@ class LatentDirichletAllocation
 (
   override val numTopics: Int,
   override val words: Dictionary,
-  override val documentInfo: List[DocumentTopic],
+  override val documentInfo: Map[String, List[TPair]],
+  override val wordInfo: Map[String, List[TPair]],
   val alpha: DenseVector[Double],
   val beta: DenseMatrix[Double]
-) extends TopicModel(numTopics, words, documentInfo) {
+) extends TopicModel(numTopics, words, documentInfo, wordInfo) {
   override protected def saveModel(dir: File): Unit = {
     import MathUtils.csvwritevec
     csvwritevec(new File(dir + "/alpha.mat"), alpha)
     csvwrite(new File(dir + "/beta.mat"), beta)
   }
+
+  override lazy val params: Map[String, AnyVal] = super.params
 
   override def likelihood(corpus: Corpus): Double = ???
 }
@@ -60,12 +63,19 @@ class LDAOptimizer
       println("  M-Step")
       mStep()
     }
-    val d: List[DocumentTopic] = nodes.map((n) =>
-      DocumentTopic(n.document.id, n.gamma.data.zipWithIndex.map {
-        case (p, i) => TPair(p, i)
-      }.toList)
-    ).toList
-    new LatentDirichletAllocation(numTopics, corpus.words, d, alpha, beta)
+    val d: Map[String, List[TPair]] = nodes.map((n) =>
+      n.document.id ->
+        n.gamma.data.zipWithIndex.map {
+          case (p, i) => TPair(p, i)
+        }.toList
+    ).toMap
+    val w: Map[String, List[TPair]] = (1 to M).map((w) =>
+      corpus.words(w) ->
+        beta(w, ::).t.toArray.zipWithIndex.map {
+          case (p, i) => TPair(p, i)
+        }.toList
+    ).toMap
+    new LatentDirichletAllocation(numTopics, corpus.words, d, w, alpha, beta)
   }
 
   def eStep() {

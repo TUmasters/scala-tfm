@@ -15,11 +15,12 @@ class NaiveTopicFlowModel
 (
   override val numTopics: Int,
   override val words: Dictionary,
-  override val documentInfo: List[DocumentTopic],
+  override val documentInfo: Map[String, List[TPair]],
+  override val wordInfo: Map[String, List[TPair]],
   val pi: DenseVector[Double],
   val a: DenseMatrix[Double],
   val theta: DenseMatrix[Double]
-) extends TopicModel(numTopics, words, documentInfo) {
+) extends TopicModel(numTopics, words, documentInfo, wordInfo) {
   override def saveModel(dir: File): Unit = {
     import MathUtils.csvwritevec
     dir.mkdirs()
@@ -111,12 +112,16 @@ class NTFMOptimizer
       mStep(interval)
     }
     println(" Collecting results per document...")
-    val d: List[DocumentTopic] = nodes.map(node => {
-      val v: Array[Double] = q(::, node.index).toArray
-      DocumentTopic(node.document.id, v.zipWithIndex.map { case (p, i) => TPair(p, i) }.filter(_.p > 0.1).sortBy(-_.p).toList)
-    }).toList
+    val d: Map[String, List[TPair]] = nodes.map(node => {
+      node.document.id ->
+        q(::, node.index).toArray.zipWithIndex.map { case (p, i) => TPair(p, i) }.filter(_.p > 0.1).sortBy(-_.p).toList
+    }).toMap
+    val w: Map[String, List[TPair]] = (0 until M).map(w =>
+      corpus.words(w) ->
+        theta(w, ::).t.toArray.zipWithIndex.map { case (p, i) => TPair(p, i ) }.toList
+    ).toMap
     println(" Done.")
-    new NaiveTopicFlowModel(numTopics, corpus.words, d, pi, a, theta)
+    new NaiveTopicFlowModel(numTopics, corpus.words, d, w, pi, a, theta)
   }
 
   val (trees: Seq[DTree], nodes: Seq[DNode]) = {

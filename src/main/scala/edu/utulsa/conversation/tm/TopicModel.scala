@@ -13,7 +13,8 @@ abstract class TopicModel
 (
   val numTopics: Int,
   val words: Dictionary,
-  val documentInfo: List[DocumentTopic]
+  val documentInfo: Map[String, List[TPair]],
+  val wordInfo: Map[String, List[TPair]]
 ) {
 
   def save(dir: File): Unit = {
@@ -24,8 +25,15 @@ abstract class TopicModel
     saveData(dir)
   }
 
+  def params: Map[String, AnyVal] = Map(
+    "num-topics" -> numTopics,
+    "num-words" -> words.size
+  )
+
   def saveData(dir: File): Unit = {
     writeJson(new File(dir + "/document-topics.json"), documentInfo)
+    writeJson(new File(dir + "/word-topics.json"), wordInfo)
+    writeJson(new File(dir + "/params.json"), params)
   }
 
   protected def writeJson[A <: AnyRef](file: File, a: A): Unit = {

@@ -13,11 +13,12 @@ class MixedMembershipTopicFlowModel
 (
   override val numTopics: Int,
   override val words: Dictionary,
-  override val documentInfo: List[DocumentTopic],
+  override val documentInfo: Map[String, List[TPair]],
+  override val wordInfo: Map[String, List[TPair]],
   val sigma: DenseMatrix[Double],
   val a: DenseMatrix[Double],
   val theta: DenseMatrix[Double]
-) extends TopicModel(numTopics, words, documentInfo) {
+) extends TopicModel(numTopics, words, documentInfo, wordInfo) {
   override protected def saveModel(dir: File): Unit = {
     csvwrite(new File(dir + "/a.mat"), a)
     csvwrite(new File(dir + "/sigma.mat"), sigma)
