@@ -60,6 +60,7 @@ for i in range(len(roots)):
     latexHeader += "\\usepackage{graphicx}\n"
     latexHeader += "\\usepackage{floatrow}\n"
     latexHeader += "\\usepackage{color}\n"
+    # latexHeader += "\\usepacakge{spverbatim}\n"
     # Create String for Latex Color Definitions
     latexColor = ""
     # Generate Latex Document Header
@@ -72,7 +73,7 @@ for i in range(len(roots)):
     for comment in roots[i]:
         # Generate Latex Document
         words = topics[comment.id]
-        latexDoc += "\\begin{verbatim}\n"+str(commentDict[comment.id]) + " " + rawComments[comment.id].content + "\n\\end{verbatim}\n"
+        latexDoc += "\\begin{spverbatim}\n"+str(commentDict[comment.id]) + " " + rawComments[comment.id].content + "\n\\end{spverbatim}\n"
         # Make word labels
         for w in words:
             while numColors <= w['t']:
