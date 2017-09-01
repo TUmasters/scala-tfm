@@ -1,5 +1,8 @@
 import itertools
 from collections import deque
+import random
+
+
 class Comment:
     def __init__(self, id, author, content, parent, replies):
         self.id = id
@@ -39,6 +42,11 @@ class Comment:
 def create_comment(d):
     return Comment(d['id'], d['author'], d['words'], d['parent'], d['replies'] if 'replies' in d else None)
 
+
+def create_comment_from_raw(d):
+    return Comment(d['id'], d['author'], d['content'], None, d['replies'] if 'replies' in d else None)
+
+
 def expand(comment,comments):
     if comment.reply_ids:
         comment.replies = [comments[id] for id in comment.reply_ids]
@@ -60,3 +68,6 @@ def expand(comment,comments):
 #     return replies
 
 
+def random_color():
+    levels = range(32, 256, 32)
+    return tuple(random.choice(levels) for _ in range(3))
