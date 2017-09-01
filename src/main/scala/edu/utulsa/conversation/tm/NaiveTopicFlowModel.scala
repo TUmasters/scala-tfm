@@ -118,7 +118,7 @@ class NTFMOptimizer
     }).toMap
     val w: Map[String, List[TPair]] = (0 until M).map(w =>
       corpus.words(w) ->
-        theta(w, ::).t.toArray.zipWithIndex.map { case (p, i) => TPair(p, i ) }.toList
+        theta(w, ::).t.toArray.zipWithIndex.map { case (p, i) => TPair(p, i ) }.sortBy(-_.p).toList
     ).toMap
     println(" Done.")
     new NaiveTopicFlowModel(numTopics, corpus.words, d, w, pi, a, theta)

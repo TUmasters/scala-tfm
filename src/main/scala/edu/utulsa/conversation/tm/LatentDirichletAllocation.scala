@@ -67,13 +67,13 @@ class LDAOptimizer
       n.document.id ->
         n.gamma.data.zipWithIndex.map {
           case (p, i) => TPair(p, i)
-        }.toList
+        }.sortBy(-_.p).toList
     ).toMap
     val w: Map[String, List[TPair]] = (1 to M).map((w) =>
       corpus.words(w) ->
         beta(w, ::).t.toArray.zipWithIndex.map {
           case (p, i) => TPair(p, i)
-        }.toList
+        }.sortBy(-_.p).toList
     ).toMap
     new LatentDirichletAllocation(numTopics, corpus.words, d, w, alpha, beta)
   }

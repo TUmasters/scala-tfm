@@ -70,11 +70,11 @@ sealed class UATFMOptimizer
     }
     val d: Map[String, List[TPair]] = dnodes.map((node) =>
       node.document.id ->
-        node.q_d().data.zipWithIndex.map { case (p, i) => TPair(p, i) }.toList
+        node.q_d().data.zipWithIndex.map { case (p, i) => TPair(p, i) }.sortBy(-_.p).toList
     ).toMap
     val w: Map[String, List[TPair]] = (0 until M).map((w) =>
       corpus.words(w) ->
-        theta(w, ::).t.toArray.zipWithIndex.map { case (p, i) => TPair(p, i) }.toList
+        theta(w, ::).t.toArray.zipWithIndex.map { case (p, i) => TPair(p, i) }.sortBy(-_.p).toList
     ).toMap
     new UserAwareTopicFlowModel(numTopics, numUserGroups, corpus.words, corpus.authors, d, w, pi, a, theta)
   }
