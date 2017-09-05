@@ -158,6 +158,8 @@ object Driver {
       val model = train(corpus)
       println("Saving model...")
       save(model)
+      println(" Saved.")
+      println(s"Marginal log-likelihood: ${model.likelihood(corpus)}")
       println("Done.")
     }
   }

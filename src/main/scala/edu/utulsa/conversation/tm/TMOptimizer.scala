@@ -9,5 +9,5 @@ abstract class TMOptimizer[TM <: TopicModel]
 ) {
   def train(): TM
 
-  protected def K: Int = numTopics
+  val K: Int = numTopics
 }

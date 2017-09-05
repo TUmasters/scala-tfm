@@ -10,17 +10,40 @@ import org.json4s.native.Serialization.write
 import java.io.PrintWriter
 
 import edu.utulsa.conversation.text.{Corpus, Dictionary, Document}
+import edu.utulsa.conversation.util._
+
+sealed trait NTFMParams {
+  implicit val modelParams: this.type = this
+  implicit val counter: ParamCounter = new ParamCounter()
+  val M: Int
+  val K: Int
+  val pi: DenseVector[Double]
+  val logPi: Param[DenseVector[Double]] = Param {
+    log(pi)
+  }
+  val a: DenseMatrix[Double]
+  val logA: Param[DenseMatrix[Double]] = Param {
+    log(a)
+  }
+  val theta: DenseMatrix[Double]
+  val logTheta: Param[DenseMatrix[Double]] = Param {
+    log(theta)
+  }
+}
 
 class NaiveTopicFlowModel
 (
   override val numTopics: Int,
   override val words: Dictionary,
-  override val documentInfo: Map[String, List[TPair]],
-  override val wordInfo: Map[String, List[TPair]],
+  override val documentInfo: Map[String, List[TPair]] = Map(),
+  override val wordInfo: Map[String, List[TPair]] = Map(),
   val pi: DenseVector[Double],
   val a: DenseMatrix[Double],
   val theta: DenseMatrix[Double]
-) extends TopicModel(numTopics, words, documentInfo, wordInfo) {
+) extends TopicModel(numTopics, words, documentInfo, wordInfo) with NTFMParams {
+  override val M: Int = words.size
+  override val K = numTopics
+
   override def saveModel(dir: File): Unit = {
     import MathUtils.csvwritevec
     dir.mkdirs()
@@ -29,7 +52,10 @@ class NaiveTopicFlowModel
     csvwrite(new File(dir + "/theta.mat"), theta)
   }
 
-  override def likelihood(corpus: Corpus): Double = ???
+  override def likelihood(corpus: Corpus): Double = {
+    val (trees, nodes) = NTFMInfer.build(corpus)
+    trees.map(_.loglikelihood).sum
+  }
 }
 
 object NaiveTopicFlowModel {
@@ -50,7 +76,7 @@ class NTFMOptimizer
   override val corpus: Corpus,
   override val numTopics: Int,
   val numIterations: Int
-) extends TMOptimizer[NaiveTopicFlowModel](corpus, numTopics) {
+) extends TMOptimizer[NaiveTopicFlowModel](corpus, numTopics) with NTFMParams {
   import MathUtils._
 
   val N = corpus.all.size
@@ -58,14 +84,11 @@ class NTFMOptimizer
 
   /** MODEL PARAMETERS **/
   val pi: DenseVector[Double]          = normalize(DenseVector.rand[Double](K)) // k x 1
-  val logPi: DenseVector[Double]       = log(pi)
   val a: DenseMatrix[Double]           = normalize(DenseMatrix.rand(K, K), Axis._1, 1.0) // k x k
-  val logA: DenseMatrix[Double]        = log(a)
   val theta: DenseMatrix[Double]       = normalize(DenseMatrix.rand(M, K), Axis._0, 1.0) // m x k
-  val logTheta: DenseMatrix[Double]    = log(theta)
 
   /** LATENT VARIABLE ESTIMATES **/
-  private val q: DenseMatrix[Double]   = DenseMatrix.zeros[Double](K, N) // k x n
+  val q: DenseMatrix[Double]   = DenseMatrix.zeros[Double](K, N) // k x n
 
   println(" Populating responses vector...")
   /** USEFUL INTERMEDIATES **/
@@ -124,7 +147,38 @@ class NTFMOptimizer
     new NaiveTopicFlowModel(numTopics, corpus.words, d, w, pi, a, theta)
   }
 
-  val (trees: Seq[DTree], nodes: Seq[DNode]) = {
+  val (trees, nodes) = NTFMInfer.build(corpus)
+  val roots: Seq[Int] = trees.map((tree) => tree.root.index)
+  var currentTime = 1
+
+  def eStep(interval: Int): Unit = {
+    counter.update()
+    trees.par.foreach { case (tree) =>
+      tree.nodes.foreach { node => q(::, node.index) := !node.z }
+    }
+  }
+
+  def mStep(interval: Int): Unit = {
+    Seq(
+      () => {
+        // Pi Maximization
+        pi := roots.map((index) => q(::, index)).reduce(_ + _)
+        pi := normalize(pi :+ 1e-4, 1.0)
+      },
+      () => {
+        // A maximization
+        a := normalize((q * b * q.t) :+ 1e-4, Axis._1, 1.0)
+      },
+      () => {
+        // Theta maximization
+        theta := normalize((q * c) :+ 1e-8, Axis._1, 1.0).t
+      }
+    ).par.foreach { case (step) => step() }
+  }
+}
+
+object NTFMInfer {
+  def build(corpus: Corpus)(implicit params: NTFMParams, counter: ParamCounter): (Seq[DTree], Seq[DNode]) = {
     val nodes: Seq[DNode] = corpus.map((document) =>
       new DNode(document, document.index)
     ).toSeq
@@ -140,26 +194,16 @@ class NTFMOptimizer
       .map((node) => new DTree(node))
     (trees, nodes)
   }
-  val roots: Seq[Int] = trees.map((tree) => tree.root.index)
-  var currentTime = 1
 
-  class Param[T >: Null]() {
-    var updated: Int = 0
-    var value: T = _
-
-    def apply(): T = value
-
-    def :=(update: => T): Unit = {
-      if (currentTime > this.updated) {
-        this.updated = currentTime
-        this.value = update
-      }
-    }
-  }
-
-  sealed class DNode(val document: Document, val index: Int) {
+  /**
+    * Inference on documents.
+    */
+  sealed class DNode(val document: Document, val index: Int)(implicit val params: NTFMParams) {
+    import MathUtils._
+    import params._
     var parent: DNode = _
     var children: Seq[DNode] = Seq()
+
     lazy val siblings: Seq[DNode] = {
       if (parent != null) {
         parent.children.filter((child) => child != this)
@@ -171,79 +215,66 @@ class NTFMOptimizer
 
     def isRoot: Boolean = this.parent == null
 
-    val pprobW = new Param[DenseVector[Double]]()
-
     /**
       * Computes log probabilities for observing a set of words for each latent
       * class.
       */
-    def probW: DenseVector[Double] = {
-      pprobW := {
-        val result =
-          if (document.words.nonEmpty)
-            document.count
-              .map { case (word, count) => logTheta(word, ::).t :* count.toDouble }
-              .reduce(_ + _)
-          else
-            DenseVector.zeros[Double](K)
-        result
-      }
-      pprobW()
+    val probW: Param[DenseVector[Double]] = Param {
+      if(document.words.nonEmpty)
+        document.count
+          .map { case (word, count) =>
+            //println((!logTheta)(word, ::))
+            (!logTheta)(word, ::).t * count.toDouble
+          }
+          .reduce(_ + _)
+      else
+        DenseVector.zeros[Double](K)
     }
 
-    val plambdaMsg = new Param[DenseVector[Double]]()
-
-    def lambdaMsg: DenseVector[Double] = {
-      plambdaMsg := {
-        lse(a, this.lambda)
+    val lambda: Param[DenseVector[Double]] = Param {
+      // Lambda messages regarding likelihood of observing the document
+      val msg1 = !probW
+      // Lambda messages from children
+      var msg2 = DenseVector.zeros[Double](K)
+      if (children.nonEmpty) {
+        msg2 = children
+          .map((child) => !child.lambdaMsg)
+          .reduce(_ + _)
       }
-      plambdaMsg()
+      msg1 :+ msg2
     }
 
-    val plambda = new Param[DenseVector[Double]]
+    val lambdaMsg: Param[DenseVector[Double]] = Param {
+      lse(a, !lambda)
+    }
 
-    def lambda: DenseVector[Double] = {
-      plambda := {
-        // Lambda messages regarding likelihood of observing the document
-        val msg1 = this.probW
-        // Lambda messages from children
-        var msg2 = DenseVector.zeros[Double](K)
-        if (children.length > 0) {
-          msg2 = children
-            .map((child) => child.lambdaMsg)
-            .reduce(_ + _)
-        }
+    val tau: Param[DenseVector[Double]] = Param {
+      if (parent == null) {
+        !logPi
+      }
+      else {
+        val msg1: DenseVector[Double] = !parent.tau
+        val msg2 = siblings
+          .map((sibling) => !sibling.lambdaMsg)
+          .fold(DenseVector.zeros[Double](K))(_ + _)
         msg1 + msg2
       }
-      plambda()
     }
 
-    val ptau = new Param[DenseVector[Double]]()
-
-    def tau: DenseVector[Double] = {
-      ptau := {
-        if (parent == null) {
-          logPi
-        }
-        else {
-          val msg1: DenseVector[Double] = parent.tau
-          val msg2 = siblings
-            .map((sibling) => sibling.lambdaMsg)
-            .fold(DenseVector.zeros[Double](K))(_ + _)
-          msg1 + msg2
-        }
-      }
-      ptau()
+    val qi: Param[DenseVector[Double]] = Param {
+      !lambda :+ !tau
     }
 
-    val pq = new Param[DenseVector[Double]]()
+    val z: Param[DenseVector[Double]] = Param {
+      exp(!qi :- lse(!qi))
+    }
+      .default { normalize(DenseVector.rand[Double](K), 1.0) }
 
-    def update(): Unit = {
-      pq := {
-        lambda + tau
-      }
-      val qi = exp(pq() :- lse(pq()))
-      q(::, index) := qi :/ sum(qi)
+    val loglikelihood: Param[Double] = Param {
+      if(parent == null)
+        lse(!logPi :+ !probW)
+      else
+        lse(log(((!parent.z) .t * a).t) :+ !probW)
     }
   }
 
@@ -257,38 +288,14 @@ class NTFMOptimizer
 
     lazy val nodes: Seq[DNode] = expand(root)
 
-    def update(): Unit = {
-      nodes.foreach { (node) => node.update() }
+    //  def update(): Unit = {
+    //    nodes.foreach { (node) => q(::, node.index) := !node.z }
+    //  }
+
+    def loglikelihood: Double = {
+      nodes.map { node =>
+        !node.loglikelihood
+      }.sum
     }
-
-    def logLikelihood(): Double = {
-      sum(root.pq())
-    }
-  }
-
-  def eStep(interval: Int): Unit = {
-    currentTime += 1
-    trees.par.foreach { case (tree) => tree.update() }
-  }
-
-  def mStep(interval: Int): Unit = {
-    Seq(
-      () => {
-        // Pi Maximization
-        pi := roots.map((index) => q(::, index)).reduce(_ + _)
-        pi := normalize(pi :+ 1e-4, 1.0)
-        logPi := log(pi)
-      },
-      () => {
-        // A maximization
-        a := normalize((q * b * q.t) :+ 1e-4, Axis._1, 1.0)
-        logA := log(a)
-      },
-      () => {
-        // Theta maximization
-        theta := normalize((q * c) :+ 1e-8, Axis._1, 1.0).t
-        logTheta := log(theta)
-      }
-    ).par.foreach { case (step) => step() }
   }
 }
