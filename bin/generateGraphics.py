@@ -5,7 +5,6 @@ import sys
 import os
 from _utils import *
 
-colors = ['blue','red','green','yellow','purple','cyan','darkgreen','darksalmon','deeppink','lightseagreen','white']
 
 # Set default parameter names
 root = 'data'
@@ -102,6 +101,7 @@ if protocol == 'plsa':
         os.system("dot -Tpdf " + output + str(i) + "/conversation.dot -o " + output + str(i) + "/conversation.pdf")
         os.system('pdflatex -interaction=nonstopmode -output-directory ' + output+str(i)+"/ " + output+str(i) + "/figure.tex > /dev/null")
 else:
+    colors = []
     with open(root+'/'+protocol+'/document-topics.json', 'r') as f:
         documentTopics = json.load(f)
     with open(root+'/'+protocol+'/word-topics.json', 'r') as f:
@@ -135,7 +135,10 @@ else:
             # Make word labels
             # TODO: create word topics
             # Construct Graph
-            graphviz += "\t" + str(commentDict[comment.id]) + " [style=filled fillcolor = " + colors[documentTopics[comment.id][0]['topic']] + "]\n"
+            while len(colors) <= documentTopics[comment.id][0]['topic']:
+                colors.append(random_color())
+            color = colors[documentTopics[comment.id][0]['topic']]
+            graphviz += "\t" + str(commentDict[comment.id]) + " [style=filled fillcolor = \"#" + convertToHex(color[0]) + convertToHex(color[1]) + convertToHex(color[2])  + "\"]\n"
             for reply in comment.replies:
                 if reply.id not in commentDict:
                     commentDict[reply.id] = len(commentDict)

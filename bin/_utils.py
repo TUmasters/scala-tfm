@@ -71,3 +71,10 @@ def expand(comment,comments):
 def random_color():
     levels = range(32, 256, 32)
     return tuple(random.choice(levels) for _ in range(3))
+
+
+def convertToHex(n):
+    s = hex(n)
+    if n < 16:
+        return '0'+s[2:]
+    return s[2:]
