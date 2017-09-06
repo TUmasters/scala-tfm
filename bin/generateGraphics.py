@@ -84,7 +84,7 @@ if protocol == 'plsa':
                     latexColor += "\\definecolor{color"+str(numColors)+"}{RGB}{"+str(color[0])+", "+str(color[1])+", "+str(color[2])+"}\n"
                     numColors += 1
                 latexDoc += "\\textcolor{color"+str(w['t']) + "}{" + w['w'] + "} "
-            latexDoc += "\\break\\break\n"
+            latexDoc += "\\hfill\\break\\hfill\\break\n"
             # Construct Graph
             for reply in comment.replies:
                 if reply.id not in commentDict:
@@ -101,13 +101,25 @@ if protocol == 'plsa':
         os.system("dot -Tpdf " + output + str(i) + "/conversation.dot -o " + output + str(i) + "/conversation.pdf")
         os.system('pdflatex -interaction=nonstopmode -output-directory ' + output+str(i)+"/ " + output+str(i) + "/figure.tex > /dev/null")
 else:
-    colors = []
+    colors = [random_color() for _ in range(5)]
     with open(root+'/'+protocol+'/document-topics.json', 'r') as f:
         documentTopics = json.load(f)
     with open(root+'/'+protocol+'/word-topics.json', 'r') as f:
         wordTopics = json.load(f)
+    with open(root+'/'+protocol+'/params.json', 'r') as f:
+        params = json.load(f)
+    # Construct list of word topics
+    topics = []
+    for i in range(params['num-topics']):
+        topics.append([])
+    for w in wordTopics:
+        for param in wordTopics[w]:
+            topics[param['topic']].append((param['p'],w))
+    for i in range(len(topics)):
+        topics[i].sort()
+        topics[i] = topics[i][-5:]
+    # Now we start generating graphics
     for i in range(len(roots)):
-        if len(roots[i].replies) < 2: continue
         if i % 100 == 0:
             print("Working on batch ", int(i/100), "of", int(len(roots)/100), "...")
         if not os.path.isdir(output+str(i)):
@@ -122,6 +134,8 @@ else:
         # latexHeader += "\\usepacakge{spverbatim}\n"
         # Create String for Latex Color Definitions
         latexColor = ""
+        for j in range(5):
+            latexColor += "\\definecolor{color"+str(j)+"}{RGB}{"+str(colors[j][0])+", "+str(colors[j][1])+", "+str(colors[j][2])+"}\n"
         # Generate Latex Document Header
         latexDoc = "\\begin{document}\n"
         latexDoc += "\\begin{center}\n"
@@ -133,7 +147,11 @@ else:
             # Generate Latex Document
             latexDoc += "\\begin{spverbatim}\n"+str(commentDict[comment.id]) + " " + rawComments[comment.id].content + "\n\\end{spverbatim}+\\hfill\\break\\hfill\\break\n"
             # Make word labels
-            # TODO: create word topics
+            topic = documentTopics[comment.id][0]['topic']
+            for j in range(len(topics[topic])):
+                if topics[topic][j][1] in comment.content:
+                    latexDoc += "\\textcolor{color"+str(j) + "}{" + topics[topic][j][1] + "} "
+            latexDoc += "\\hfill\\break\\hfill\\break\n"
             # Construct Graph
             while len(colors) <= documentTopics[comment.id][0]['topic']:
                 colors.append(random_color())
@@ -153,4 +171,3 @@ else:
     
         os.system("dot -Tpdf " + output + str(i) + "/conversation.dot -o " + output + str(i) + "/conversation.pdf")
         os.system('pdflatex -interaction=nonstopmode -output-directory ' + output+str(i)+"/ " + output+str(i) + "/figure.tex > /dev/null")
-        break
