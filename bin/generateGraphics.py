@@ -101,7 +101,6 @@ if protocol == 'plsa':
         os.system("dot -Tpdf " + output + str(i) + "/conversation.dot -o " + output + str(i) + "/conversation.pdf")
         os.system('pdflatex -interaction=nonstopmode -output-directory ' + output+str(i)+"/ " + output+str(i) + "/figure.tex > /dev/null")
 else:
-    colors = [random_color() for _ in range(5)]
     with open(root+'/'+protocol+'/document-topics.json', 'r') as f:
         documentTopics = json.load(f)
     with open(root+'/'+protocol+'/word-topics.json', 'r') as f:
@@ -117,7 +116,9 @@ else:
             topics[param['topic']].append((param['p'],w))
     for i in range(len(topics)):
         topics[i].sort()
-        topics[i] = topics[i][-5:]
+        topics[i].reverse()
+    # Construct colors
+    colors = [random_color() for _ in range(params['num-topics'])]
     # Now we start generating graphics
     for i in range(len(roots)):
         if i % 100 == 0:
@@ -134,7 +135,7 @@ else:
         # latexHeader += "\\usepacakge{spverbatim}\n"
         # Create String for Latex Color Definitions
         latexColor = ""
-        for j in range(5):
+        for j in range(len(colors)):
             latexColor += "\\definecolor{color"+str(j)+"}{RGB}{"+str(colors[j][0])+", "+str(colors[j][1])+", "+str(colors[j][2])+"}\n"
         # Generate Latex Document Header
         latexDoc = "\\begin{document}\n"
@@ -146,16 +147,19 @@ else:
         for comment in roots[i]:
             # Generate Latex Document
             latexDoc += "\\begin{spverbatim}\n"+str(commentDict[comment.id]) + " " + rawComments[comment.id].content + "\n\\end{spverbatim}+\\hfill\\break\\hfill\\break\n"
-            # Make word labels
+            # Generate colors for topic
             topic = documentTopics[comment.id][0]['topic']
+            # Make word labels
+            tCount = 0
             for j in range(len(topics[topic])):
                 if topics[topic][j][1] in comment.content:
-                    latexDoc += "\\textcolor{color"+str(j) + "}{" + topics[topic][j][1] + "} "
+                    latexDoc += "\\textcolor{color"+str(topic) + "}{" + topics[topic][j][1] + "} "
+                    tCount += 1
+                if tCount >= 5:
+                    break
             latexDoc += "\\hfill\\break\\hfill\\break\n"
             # Construct Graph
-            while len(colors) <= documentTopics[comment.id][0]['topic']:
-                colors.append(random_color())
-            color = colors[documentTopics[comment.id][0]['topic']]
+            color = colors[topic]
             graphviz += "\t" + str(commentDict[comment.id]) + " [style=filled fillcolor = \"#" + convertToHex(color[0]) + convertToHex(color[1]) + convertToHex(color[2])  + "\"]\n"
             for reply in comment.replies:
                 if reply.id not in commentDict:
