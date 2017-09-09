@@ -9,7 +9,7 @@ from _utils import *
 # Set default parameter names
 root = 'data'
 protocol = 'uatfm'
-source = 'comments.json'
+source = 'documents.json'
 rawFile = 'raw.json'
 
 # Load parameters from command line arguments
@@ -132,6 +132,7 @@ else:
         latexHeader += "\\usepackage{graphicx}\n"
         latexHeader += "\\usepackage{floatrow}\n"
         latexHeader += "\\usepackage{color}\n"
+        latexHeader += "\\usepackage{spverbatim}\n"
         # latexHeader += "\\usepacakge{spverbatim}\n"
         # Create String for Latex Color Definitions
         latexColor = ""
