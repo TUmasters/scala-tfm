@@ -109,20 +109,20 @@ class NTFMOptimizer
 //    m
 //  }
 
-  println(" Generating conversation matrix...")
+//  println(" Generating conversation matrix...")
   private val b: CSCMatrix[Double] = {
     val builder = new CSCMatrix.Builder[Double](N, N)
 
     corpus.replies.zipWithIndex.foreach { case (document: Document, source: Int) =>
       document.replies.foreach { case (reply: Document) =>
-        builder.add(document.index, reply.index, 1d)
+        builder.add(corpus.index(document), corpus.index(reply), 1d)
       }
     }
 
     builder.result()
   }
 
-  println(" Generating word occurrence matrix...")
+//  println(" Generating word occurrence matrix...")
   private val c: CSCMatrix[Double] = {
     val builder = new CSCMatrix.Builder[Double](N, M)
 
@@ -137,13 +137,13 @@ class NTFMOptimizer
 
   override def train(): NaiveTopicFlowModel = {
     (1 to numIterations).foreach { (interval) =>
-      println(s" Interval: $interval")
-      println("  - E step")
+//      println(s" Interval: $interval")
+//      println("  - E step")
       eStep(interval)
-      println("  - M step")
+//      println("  - M step")
       mStep(interval)
     }
-    println(" Collecting results per document...")
+//    println(" Collecting results per document...")
     val d: Map[String, List[TPair]] = nodes.map(node => {
       node.document.id ->
         q(::, node.index).toArray.zipWithIndex.map { case (p, i) => TPair(p, i) }.filter(_.p > 0.1).sortBy(-_.p).toList
@@ -152,7 +152,7 @@ class NTFMOptimizer
       corpus.words(w) ->
         theta(w, ::).t.toArray.zipWithIndex.map { case (p, i) => TPair(p, i ) }.sortBy(-_.p).toList
     ).toMap
-    println(" Done.")
+//    println(" Done.")
     new NaiveTopicFlowModel(numTopics, corpus, d, w, pi, a, theta)
   }
 
@@ -189,15 +189,15 @@ class NTFMOptimizer
 object NTFMInfer {
   def build(corpus: Corpus)(implicit params: NTFMParams, counter: ParamCounter): (Seq[DTree], Seq[DNode]) = {
     val nodes: Seq[DNode] = corpus.map((document) =>
-      new DNode(document, document.index)
+      new DNode(document, corpus.index(document))
     ).toSeq
     nodes.foreach { (node) =>
       val d = node.document
       d.parent match {
-        case Some(parent) => node.parent = nodes(parent.index)
+        case Some(parent) => node.parent = nodes(corpus.index(parent))
         case None =>
       }
-      node.children = d.replies.map((c) => nodes(c.index))
+      node.children = d.replies.map((c) => nodes(corpus.index(c)))
     }
     val trees = nodes.filter((node) => node.parent == null)
       .map((node) => new DTree(node))

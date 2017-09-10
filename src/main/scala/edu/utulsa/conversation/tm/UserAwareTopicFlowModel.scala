@@ -108,12 +108,13 @@ class UATFMOptimizer
   override def train(): UserAwareTopicFlowModel = {
 //    println("Initializing...")
     (1 to numIterations).foreach { (interval) =>
-//      println(s" Interval: $interval")
+      print(s" (t $interval)")
 //      println("  - E step")
       eStep(interval)
 //      println("  - M step")
       mStep(interval)
     }
+    println()
     val d: Map[String, List[TPair]] = dnodes.map((node) =>
       node.document.id ->
         (!node.z).data.zipWithIndex.map { case (p, i) => TPair(p, i) }.sortBy(-_.p).toList
@@ -247,7 +248,6 @@ object UATFMInfer {
     corpus.groupBy(_.author).foreach { case (author: Int, documents: List[Document]) =>
       unodes(author).documents = documents.map(dnodes(_)).toSeq
       documents.foreach((document) => {
-        dnodes(document).author = author
         dnodes(document).unode = unodes(author)
       })
     }
@@ -286,7 +286,7 @@ object UATFMInfer {
       val newR = exp(n :- lse(n))
       dist = norm(oldR - newR)
       newR
-    }.default { DenseVector.rand[Double](K) }
+    }.default { DenseVector.rand[Double](G) }
 
     var dist: Double = G
 
@@ -308,7 +308,7 @@ object UATFMInfer {
     import math._
 
     var parent: DNode = _
-    var author: Int = -1
+    //var author: Int = -1
     var unode: UNode = _
     var children: Seq[DNode] = Seq()
 
@@ -362,7 +362,7 @@ object UATFMInfer {
       implicit val tmp: UATFMParams = params
       if (parent == null) {
         lse((!logPi).zipWithIndex.map { case (pi_g, g) =>
-          pi_g :+ log(!unode.r)
+          pi_g :+ log((!unode.r)(g))
         })
       }
       else {
@@ -420,24 +420,25 @@ object UATFMInfer {
                       q: DenseMatrix[Double] = null, r: DenseMatrix[Double] = null, qr: Array[DenseMatrix[Double]] = null
                      )(implicit counters: (ParamCounter, ParamCounter)): Unit = {
     import scala.util.control.Breaks._
+    val roots = dnodes.filter(_.isRoot)
     breakable {
       for(i <- 1 to 10) {
 //        println(s"    - Interval $i")
-//        println("      * document update")
-        counters._1.update()
-        unodes.foreach(_.r.force())
-        // println(r(::, 1))
 //        println("      * user update")
+        counters._1.update()
+        unodes.par.foreach(_.r.force())
+        // println(r(::, 1))
+//        println("      * document update")
         counters._2.update()
-        dnodes.foreach(_.z.force())
+        roots.par.foreach(_.z.force())
         val derror = dnodes.map((dnode) => dnode.dist).sum / dnodes.size
         val dncert = sum(dnodes.map((dnode) => if(any(!dnode.z :> 0.5)) 1 else 0))
         val uerror = unodes.map((unode) => unode.dist).sum / unodes.size
         val uncert = sum(unodes.map((unode) => if(any(!unode.r :> 0.5)) 1 else 0))
-//        println(f"      error: document $derror%4e user $uerror%4e")
+//        println(f"      $i%4d error: document $derror%4e user $uerror%4e")
 //        println(f"      count: document $dncert%6d/${q.cols}%6d user $uncert%6d/${r.cols}%6d")
 //        println(r(::, 0))
-        if(derror <= 1e-4 && uerror <= 1e-4)
+        if(derror <= 1e-3 && uerror <= 1e-3)
           break
       }
     }

@@ -2,7 +2,6 @@ package edu.utulsa.conversation.text
 
 class Document
 (
-  val index: Int,
   val id: String,
   val author: Int,
   val words: Seq[Int]

@@ -77,7 +77,7 @@ class MMTFMOptimizer
     * @param document Corresponding document object.
     */
   class DNode(val document: Document) {
-    def index: Int = document.index
+    def index: Int = corpus.index(document)
     var parent: DNode = null
     var children: Seq[DNode] = Seq()
 

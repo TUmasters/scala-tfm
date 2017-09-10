@@ -10,7 +10,7 @@ class CVResults(val scores: Seq[Double]) extends EvaluatorResults {
   override def formatted = {
     f"""
        | Scores: ${scores.map((s) => f"$s%8.6f").mkString(", ")}
-       | Avg. Score: ${lse(scores.toArray) - log(scores.length)}
+       | Combined Score: ${scores.sum}
      """.stripMargin
   }
 }

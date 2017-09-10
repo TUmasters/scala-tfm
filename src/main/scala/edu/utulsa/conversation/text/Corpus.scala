@@ -17,6 +17,7 @@ class Corpus
   lazy val roots: Seq[Document] = documents.filter(_.parent.isEmpty)
   lazy val replies: Seq[Document] = documents.filter(_.parent.isDefined)
   lazy val id2doc: Map[String, Document] = documents.map((d) => d.id -> d).toMap
+  lazy val index: Map[Document, Int] = documents.zipWithIndex.toMap
 
   override def size: Int = documents.size
   override def iterator = documents.iterator
@@ -60,8 +61,8 @@ object Corpus {
 
   private def apply(data: Seq[DocumentData], words: Dictionary, authors: Dictionary): Corpus = {
     val documents: Seq[Document] = {
-      val documents = data.zipWithIndex.map {
-        case (data: DocumentData, index: Int) =>
+      val documents = data.map {
+        case (data: DocumentData) =>
           require(authors.keys.contains(data.author),
             s"Author '${data.author}' not found in cached 'authors.csv', documents file may have been updated. " +
               s"Please delete 'corpus' directory and re-execute.")
@@ -70,7 +71,7 @@ object Corpus {
               s"Word '$w' not found in cached 'words.csv', documents file may have been updated. " +
                 s"Please delete 'corpus' directory and re-execute.")
           }
-          new Document(index, data.id, authors(data.author), words(data.words))
+          new Document(data.id, authors(data.author), words(data.words))
       }
       val m: Map[String, Document] = documents.map((d) => d.id -> d).toMap
       documents.zip(data).foreach { case (document, data: DocumentData) =>
