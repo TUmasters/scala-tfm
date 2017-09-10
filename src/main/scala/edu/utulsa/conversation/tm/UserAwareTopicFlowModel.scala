@@ -11,7 +11,7 @@ import org.json4s.native.Serialization.write
 import java.io.PrintWriter
 
 import edu.utulsa.conversation.text.{Corpus, Dictionary, Document}
-import edu.utulsa.conversation.util.{Param, ParamCounter}
+import edu.utulsa.conversation.util.{math, Param, ParamCounter}
 import spire.math.poly.Term
 
 trait UATFMParams {
@@ -36,15 +36,15 @@ class UserAwareTopicFlowModel
 (
   override val numTopics: Int,
   val numUserGroups: Int,
-  override val words: Dictionary,
+  override val corpus: Corpus,
   val authors: Dictionary,
   override val documentInfo: Map[String, List[TPair]],
   override val wordInfo: Map[String, List[TPair]],
   val pi: Array[DenseVector[Double]],
   val a: Array[DenseMatrix[Double]],
   val theta: DenseMatrix[Double]
-) extends TopicModel(numTopics, words, documentInfo, wordInfo) with UATFMParams {
-  val M: Int = words.size
+) extends TopicModel(numTopics, corpus, documentInfo, wordInfo) with UATFMParams {
+  val M: Int = corpus.words.size
   val K: Int = numTopics
   val G: Int = numUserGroups
   override val r: DenseMatrix[Double] = null
@@ -55,13 +55,28 @@ class UserAwareTopicFlowModel
   override protected def saveModel(dir: File): Unit = {
     csvwrite(new File(dir + "/theta.csv"), theta)
     for(i <- 0 until numUserGroups) {
-      MathUtils.csvwritevec(new File(dir + f"/pi.g$i%02d.csv"), pi(i))
+      math.csvwritevec(new File(dir + f"/pi.g$i%02d.csv"), pi(i))
       csvwrite(new File(dir + f"/a.g$i%02d.csv"), a(i))
     }
   }
   override def likelihood(corpus: Corpus): Double = {
-    val (trees: Seq[UATFMInfer.DTree], _, _) = UATFMInfer.build(corpus)
+    val (trees: Seq[UATFMInfer.DTree], dnodes: Seq[UATFMInfer.DNode], unodes: Seq[UATFMInfer.UNode]) = UATFMInfer.build(corpus)
+    UATFMInfer.eStep(trees, dnodes, unodes, G)
     trees.map(_.loglikelihood).sum
+  }
+}
+
+class UATFMAlgorithm extends TMAlgorithm {
+  val numUserGroups: Parameter[Int] = new Parameter(5)
+  def setNumUserGroups(value: Int): this.type = numUserGroups := value
+  val numIterations: Parameter[Int] = new Parameter(20)
+  def setNumIterations(value: Int): this.type = numIterations := value
+  val maxEIterations: Parameter[Int] = new Parameter(10)
+  def setMaxEIterations(value: Int): this.type = maxEIterations := value
+
+  def train(corpus: Corpus): UserAwareTopicFlowModel = {
+    new UATFMOptimizer(corpus, $(numTopics), $(numUserGroups), $(numIterations), $(maxEIterations))
+      .train()
   }
 }
 
@@ -79,7 +94,7 @@ object UserAwareTopicFlowModel {
   }
 }
 
-sealed class UATFMOptimizer
+class UATFMOptimizer
 (
   override val corpus: Corpus,
   override val numTopics: Int,
@@ -88,15 +103,15 @@ sealed class UATFMOptimizer
   val maxEIterations: Int
 ) extends TMOptimizer[UserAwareTopicFlowModel](corpus, numTopics) with UATFMParams {
 
-  import MathUtils._
+  import math._
 
   override def train(): UserAwareTopicFlowModel = {
-    println("Initializing...")
+//    println("Initializing...")
     (1 to numIterations).foreach { (interval) =>
-      println(s" Interval: $interval")
-      println("  - E step")
+//      println(s" Interval: $interval")
+//      println("  - E step")
       eStep(interval)
-      println("  - M step")
+//      println("  - M step")
       mStep(interval)
     }
     val d: Map[String, List[TPair]] = dnodes.map((node) =>
@@ -107,7 +122,7 @@ sealed class UATFMOptimizer
       corpus.words(w) ->
         theta(w, ::).t.toArray.zipWithIndex.map { case (p, i) => TPair(p, i) }.sortBy(-_.p).toList
     ).toMap
-    new UserAwareTopicFlowModel(numTopics, numUserGroups, corpus.words, corpus.authors, d, w, pi, a, theta)
+    new UserAwareTopicFlowModel(numTopics, numUserGroups, corpus, corpus.authors, d, w, pi, a, theta)
   }
 
   val N: Int = corpus.size
@@ -123,7 +138,7 @@ sealed class UATFMOptimizer
     val a: Array[DenseMatrix[Double]],
     val theta: DenseMatrix[Double]
   ) {
-    import MathUtils._
+    import math._
 
     val id: Int = rand.nextInt()
 
@@ -180,44 +195,7 @@ sealed class UATFMOptimizer
   }   // n x m
 
   protected def eStep(interval: Int): Unit = {
-    import scala.util.control.Breaks._
-
-    breakable {
-      for(i <- 1 to 10) {
-        println(s"    - Interval $i")
-        println("      * document update")
-        counters._1.update()
-        trees.par.foreach  { tree =>
-          tree.nodes.foreach { node =>
-            q(::, node.index) := !node.z
-          }
-        }
-        // println(r(::, 1))
-        println("      * user update")
-        counters._2.update()
-        unodes.par.foreach { node =>
-          r(::, node.user) := !node.r
-        }
-        val derror = dnodes.map((dnode) => dnode.dist).sum / dnodes.size
-        val dncert = sum(dnodes.map((dnode) => if(any(!dnode.z :> 0.5)) 1 else 0))
-        val uerror = unodes.map((unode) => unode.dist).sum / unodes.size
-        val uncert = sum(unodes.map((unode) => if(any(!unode.r :> 0.5)) 1 else 0))
-        println(f"      error: document $derror%4e user $uerror%4e")
-        println(f"      count: document $dncert%6d/${q.cols}%6d user $uncert%6d/${r.cols}%6d")
-        println(r(::, 0))
-        if(derror <= 1e-4 && uerror <= 1e-4)
-          break
-      }
-    }
-
-    (0 until G).foreach { (g) =>
-      qr(g) := q
-      unodes.foreach { (unode) =>
-        unode.documents.foreach { (dnode) =>
-          qr(g)(::, dnode.index) :*= (!unode.r)(g)
-        }
-      }
-    }
+    UATFMInfer.eStep(trees, dnodes, unodes, G, q, r, qr)
   }
 
   protected def mStep(interval: Int): Unit = {
@@ -246,18 +224,17 @@ sealed class UATFMOptimizer
 
 
 object UATFMInfer {
-
   def build(corpus: Corpus)(implicit params: UATFMParams, counters: (ParamCounter, ParamCounter)): (Seq[DTree], Seq[DNode], Seq[UNode]) = {
     val dnodes: Map[Document, DNode] = corpus.zipWithIndex.map { case (document, index) =>
       document -> new DNode(document, index)(params, counters._2)
     }.toMap
 
-    println(" - Creating author nodes...")
-    val unodes: Map[Int, UNode] = corpus.authors.ids.map { case (author: Int) =>
+//    println(" - Creating author nodes...")
+    val unodes: Map[Int, UNode] = corpus.documents.map(_.author).toSet.map((author: Int) =>
       author -> new UNode(author)(params, counters._1)
-    }.toMap
+    ).toMap
 
-    println(" - Mapping replies...")
+//    println(" - Mapping replies...")
     dnodes.foreach { case (document, node) =>
       node.parent = document.parent match {
         case Some(key) => dnodes(key)
@@ -266,15 +243,16 @@ object UATFMInfer {
       node.children = document.replies.map(dnodes(_)).toSeq
     }
 
-    println(" - Mapping users to authors...")
+//    println(" - Mapping users to authors...")
     corpus.groupBy(_.author).foreach { case (author: Int, documents: List[Document]) =>
       unodes(author).documents = documents.map(dnodes(_)).toSeq
-      documents.foreach((document) =>
+      documents.foreach((document) => {
         dnodes(document).author = author
-      )
+        dnodes(document).unode = unodes(author)
+      })
     }
 
-    println(" - Creating trees...")
+//    println(" - Creating trees...")
     val trees = dnodes.values
       .filter((node) => node.isRoot)
       .map((root) => new DTree(root))
@@ -289,11 +267,11 @@ object UATFMInfer {
   sealed class UNode(val user: Int)(implicit val params: UATFMParams, implicit val counter: ParamCounter) {
 
     import params._
-    import MathUtils._
+    import math._
 
     var documents: Seq[DNode] = Seq()
     val r: Param[DenseVector[Double]] = Param {
-      val oldR = (!r).copy
+      val oldR = r.value.copy
       val n = documents.map { case (node) =>
         if (node.isRoot)
           DenseVector[Double]((0 until G).map((g) =>
@@ -308,7 +286,7 @@ object UATFMInfer {
       val newR = exp(n :- lse(n))
       dist = norm(oldR - newR)
       newR
-    }
+    }.default { DenseVector.rand[Double](K) }
 
     var dist: Double = G
 
@@ -327,7 +305,7 @@ object UATFMInfer {
   sealed class DNode(val document: Document, val index: Int)(implicit val params: UATFMParams, implicit val counter: ParamCounter) {
 
     import params._
-    import MathUtils._
+    import math._
 
     var parent: DNode = _
     var author: Int = -1
@@ -363,7 +341,7 @@ object UATFMInfer {
     }
 
     val lambdaMsg: Param[DenseVector[Double]] = Param {
-      lse((0 until G).map((g) => lse(a(g), !lambda) :+ log(r(g, author))).toArray)
+      lse((0 until G).map((g) => lse(a(g), !lambda) :+ log((!unode.r)(g))).toArray)
     }
 
     val lambda: Param[DenseVector[Double]] = Param {
@@ -384,7 +362,7 @@ object UATFMInfer {
       implicit val tmp: UATFMParams = params
       if (parent == null) {
         lse((!logPi).zipWithIndex.map { case (pi_g, g) =>
-          pi_g :+ log(r(g, author))
+          pi_g :+ log(!unode.r)
         })
       }
       else {
@@ -396,12 +374,15 @@ object UATFMInfer {
       }
     }
 
-    val z: Param[DenseVector[Double]] = Param {
-      val tmp = !lambda :+ !tau
-      exp(tmp :- lse(tmp))
-    }
-
     var dist: Double = K
+
+    val z: Param[DenseVector[Double]] = Param {
+      val oldZ = z.value
+      val tmp = !lambda :+ !tau
+      val newZ = exp(tmp :- lse(tmp))
+      dist = norm(oldZ - newZ)
+      newZ
+    }.default { DenseVector.rand[Double](K) }
 
 //    def update(): Unit = {
 //      val old_q = q_d.get
@@ -412,9 +393,9 @@ object UATFMInfer {
 
     val loglikelihood: Param[Double] = Param {
       if(parent == null)
-        pi.zipWithIndex.map { case (pi, i) => log(!probW dot pi * (!unode.r)(i))}.sum
+        lse(pi.zipWithIndex.map { case (pi, g) => lse(!probW :+ log(pi * (!unode.r)(g))) })
       else
-        a.zipWithIndex.map { case (a, i) => log((!probW).t * a * !parent.z * (!unode.r)(i))}.sum
+        lse(a.zipWithIndex.map { case (a, g) => lse(!probW :+ log(a.t * !parent.z * (!unode.r)(g)))})
     }
   }
 
@@ -433,5 +414,51 @@ object UATFMInfer {
 //    }
 
     def loglikelihood: Double = nodes.map(!_.loglikelihood).sum
+  }
+
+  def eStep(trees: Seq[DTree], dnodes: Seq[DNode], unodes: Seq[UNode], G: Int,
+                      q: DenseMatrix[Double] = null, r: DenseMatrix[Double] = null, qr: Array[DenseMatrix[Double]] = null
+                     )(implicit counters: (ParamCounter, ParamCounter)): Unit = {
+    import scala.util.control.Breaks._
+    breakable {
+      for(i <- 1 to 10) {
+//        println(s"    - Interval $i")
+//        println("      * document update")
+        counters._1.update()
+        unodes.foreach(_.r.force())
+        // println(r(::, 1))
+//        println("      * user update")
+        counters._2.update()
+        dnodes.foreach(_.z.force())
+        val derror = dnodes.map((dnode) => dnode.dist).sum / dnodes.size
+        val dncert = sum(dnodes.map((dnode) => if(any(!dnode.z :> 0.5)) 1 else 0))
+        val uerror = unodes.map((unode) => unode.dist).sum / unodes.size
+        val uncert = sum(unodes.map((unode) => if(any(!unode.r :> 0.5)) 1 else 0))
+//        println(f"      error: document $derror%4e user $uerror%4e")
+//        println(f"      count: document $dncert%6d/${q.cols}%6d user $uncert%6d/${r.cols}%6d")
+//        println(r(::, 0))
+        if(derror <= 1e-4 && uerror <= 1e-4)
+          break
+      }
+    }
+    if(q != null)
+      trees.par.foreach  { tree =>
+        tree.nodes.foreach { node =>
+          q(::, node.index) := !node.z
+        }
+      }
+    if(r != null)
+      unodes.par.foreach { node =>
+        r(::, node.user) := !node.r
+      }
+    if(qr != null && q != null && r != null)
+      (0 until G).foreach { (g) =>
+        qr(g) := q
+        unodes.foreach { (unode) =>
+          unode.documents.foreach { (dnode) =>
+            qr(g)(::, dnode.index) :*= (!unode.r)(g)
+          }
+        }
+      }
   }
 }

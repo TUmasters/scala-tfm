@@ -9,14 +9,14 @@ import edu.utulsa.conversation.text.{Corpus, Dictionary, Document}
 class LatentDirichletAllocation
 (
   override val numTopics: Int,
-  override val words: Dictionary,
+  override val corpus: Corpus,
   override val documentInfo: Map[String, List[TPair]],
   override val wordInfo: Map[String, List[TPair]],
   val alpha: DenseVector[Double],
   val beta: DenseMatrix[Double]
-) extends TopicModel(numTopics, words, documentInfo, wordInfo) {
+) extends TopicModel(numTopics, corpus, documentInfo, wordInfo) {
   override protected def saveModel(dir: File): Unit = {
-    import MathUtils.csvwritevec
+    import edu.utulsa.conversation.util.math.csvwritevec
     csvwritevec(new File(dir + "/alpha.mat"), alpha)
     csvwrite(new File(dir + "/beta.mat"), beta)
   }
@@ -42,7 +42,7 @@ class LDAOptimizer
   val maxAlphaIterations: Int = 15
 ) extends TMOptimizer[LatentDirichletAllocation](corpus, numTopics) {
 
-  import MathUtils._
+  import edu.utulsa.conversation.util.math._
 
   val N = corpus.size
   val M = corpus.words.size
@@ -75,7 +75,7 @@ class LDAOptimizer
           case (p, i) => TPair(p, i)
         }.sortBy(-_.p).toList
     ).toMap
-    new LatentDirichletAllocation(numTopics, corpus.words, d, w, alpha, beta)
+    new LatentDirichletAllocation(numTopics, corpus, d, w, alpha, beta)
   }
 
   def eStep() {

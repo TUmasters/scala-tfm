@@ -34,18 +34,18 @@ sealed trait NTFMParams {
 class NaiveTopicFlowModel
 (
   override val numTopics: Int,
-  override val words: Dictionary,
+  override val corpus: Corpus,
   override val documentInfo: Map[String, List[TPair]] = Map(),
   override val wordInfo: Map[String, List[TPair]] = Map(),
   val pi: DenseVector[Double],
   val a: DenseMatrix[Double],
   val theta: DenseMatrix[Double]
-) extends TopicModel(numTopics, words, documentInfo, wordInfo) with NTFMParams {
-  override val M: Int = words.size
-  override val K = numTopics
+) extends TopicModel(numTopics, corpus, documentInfo, wordInfo) with NTFMParams {
+  override val M: Int = corpus.words.size
+  override val K: Int = numTopics
 
   override def saveModel(dir: File): Unit = {
-    import MathUtils.csvwritevec
+    import math.csvwritevec
     dir.mkdirs()
     csvwritevec(new File(dir + "/pi.mat"), pi)
     csvwrite(new File(dir + "/a.mat"), a)
@@ -56,6 +56,15 @@ class NaiveTopicFlowModel
     val (trees, nodes) = NTFMInfer.build(corpus)
     trees.map(_.loglikelihood).sum
   }
+}
+
+class NTFMAlgorithm extends TMAlgorithm {
+  val numIterations: Parameter[Int] = new Parameter(10)
+  def setNumIterations(value: Int): this.type = numIterations := value
+
+  override def train(corpus: Corpus): NaiveTopicFlowModel =
+    new NTFMOptimizer(corpus, $(numTopics), $(numIterations))
+      .train()
 }
 
 object NaiveTopicFlowModel {
@@ -77,10 +86,10 @@ class NTFMOptimizer
   override val numTopics: Int,
   val numIterations: Int
 ) extends TMOptimizer[NaiveTopicFlowModel](corpus, numTopics) with NTFMParams {
-  import MathUtils._
+  import math._
 
-  val N = corpus.all.size
-  val M = corpus.words.size
+  val N: Int = corpus.documents.size
+  val M: Int = corpus.words.size
 
   /** MODEL PARAMETERS **/
   val pi: DenseVector[Double]          = normalize(DenseVector.rand[Double](K)) // k x 1
@@ -90,15 +99,15 @@ class NTFMOptimizer
   /** LATENT VARIABLE ESTIMATES **/
   val q: DenseMatrix[Double]   = DenseMatrix.zeros[Double](K, N) // k x n
 
-  println(" Populating responses vector...")
-  /** USEFUL INTERMEDIATES **/
-  private val responses: DenseVector[Double] = {
-    val m = DenseVector.zeros[Double](N)
-    corpus.replies.zipWithIndex.foreach{ case (document, index) =>
-      m(index) = document.replies.length.toDouble
-    }
-    m
-  }
+//  println(" Populating responses vector...")
+//  /** USEFUL INTERMEDIATES **/
+//  private val responses: DenseVector[Double] = {
+//    val m = DenseVector.zeros[Double](N)
+//    corpus.replies.zipWithIndex.foreach{ case (document, index) =>
+//      m(index) = document.replies.length.toDouble
+//    }
+//    m
+//  }
 
   println(" Generating conversation matrix...")
   private val b: CSCMatrix[Double] = {
@@ -144,7 +153,7 @@ class NTFMOptimizer
         theta(w, ::).t.toArray.zipWithIndex.map { case (p, i) => TPair(p, i ) }.sortBy(-_.p).toList
     ).toMap
     println(" Done.")
-    new NaiveTopicFlowModel(numTopics, corpus.words, d, w, pi, a, theta)
+    new NaiveTopicFlowModel(numTopics, corpus, d, w, pi, a, theta)
   }
 
   val (trees, nodes) = NTFMInfer.build(corpus)
@@ -199,7 +208,7 @@ object NTFMInfer {
     * Inference on documents.
     */
   sealed class DNode(val document: Document, val index: Int)(implicit val params: NTFMParams) {
-    import MathUtils._
+    import math._
     import params._
     var parent: DNode = _
     var children: Seq[DNode] = Seq()

@@ -3,6 +3,10 @@ package edu.utulsa.conversation.util
 class Param[T] private (update: => T, val context: ParamCounter = null) {
   var lastUpdated = -1
   var value: T = _
+  def force(): Unit = {
+    lastUpdated = context.updateID
+    value = update
+  }
   def get(): T = synchronized {
     if(lastUpdated != context.updateID) {
       lastUpdated = context.updateID

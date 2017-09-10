@@ -12,13 +12,13 @@ import scala.util.control.Breaks._
 class MixedMembershipTopicFlowModel
 (
   override val numTopics: Int,
-  override val words: Dictionary,
+  override val corpus: Corpus,
   override val documentInfo: Map[String, List[TPair]],
   override val wordInfo: Map[String, List[TPair]],
   val sigma: DenseMatrix[Double],
   val a: DenseMatrix[Double],
   val theta: DenseMatrix[Double]
-) extends TopicModel(numTopics, words, documentInfo, wordInfo) {
+) extends TopicModel(numTopics, corpus, documentInfo, wordInfo) {
   override protected def saveModel(dir: File): Unit = {
     csvwrite(new File(dir + "/a.mat"), a)
     csvwrite(new File(dir + "/sigma.mat"), sigma)
@@ -32,14 +32,14 @@ object MixedMembershipTopicFlowModel {
   def train(corpus: Corpus, numTopics: Int, numIterations: Int): MixedMembershipTopicFlowModel = ???
 }
 
-sealed class MMTFMOptimizer
+class MMTFMOptimizer
 (
   override val corpus: Corpus,
   override val numTopics: Int,
   val sigmaFactor: Double = 4.0
 ) extends TMOptimizer[MixedMembershipTopicFlowModel](corpus, numTopics) {
 
-  import MathUtils._
+  import edu.utulsa.conversation.util.math._
 
   override def train(): MixedMembershipTopicFlowModel = ???
 
@@ -417,8 +417,7 @@ sealed class MMTFMOptimizer
       .map((node) => {
         val d = node.x - a * node.parent.x
         d dot d
-      })
-      .reduce(_ + _)
+      }).sum
     println(s"  avg. diff: ${s/replies.length}")
 
     // sigmaStep()

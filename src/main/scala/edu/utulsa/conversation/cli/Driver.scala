@@ -3,6 +3,7 @@ package edu.utulsa.conversation.cli
 import edu.utulsa.conversation.tm._
 import java.io.File
 
+import edu.utulsa.conversation.eval._
 import edu.utulsa.conversation.text.{Corpus, DocumentData}
 
 import scala.reflect.runtime.universe._
@@ -92,6 +93,25 @@ object Driver {
     Some(15),
     (arg: Int) => arg > 0
   )
+  val evaluators: Seq[String] = Seq("default", "cv", "dc", "train-test")
+  private val evaluate = new Argument[String](
+    """Method for evaluating model on the dataset.""",
+    "--evaluate",
+    Some("default"),
+    (arg: String) => evaluators.contains(arg)
+  )
+  private val numFolds = new Argument[Int](
+    """Number of folds for cross-validation.""",
+    "--num-folds",
+    Some(10),
+    (arg: Int) => arg > 0
+  )
+  private val trainTestSplitP = new Argument[Double](
+    """Train/test split proportion.""",
+    "--train-test-p",
+    Some(0.6),
+    (arg: Double) => arg > 0 && arg < 1
+  )
 
   private def $[T](key: Argument[T]): T = {
     if(option contains key)
@@ -138,7 +158,7 @@ object Driver {
       case _ if $(algorithm) == "mmtfm" =>
         MixedMembershipTopicFlowModel.train(corpus, $(numTopics), $(numIterations))
     }
-    model
+      model
   }
 
   def save(model: TopicModel): Unit = {
@@ -154,13 +174,34 @@ object Driver {
       option = parseArguments(args.toList)
       println("Loading corpus...")
       val corpus = loadCorpus()
-      println("Training model...")
-      val model = train(corpus)
-      println("Saving model...")
-      save(model)
-      println(" Saved.")
-      println(s"Marginal log-likelihood: ${model.likelihood(corpus)}")
-      println("Done.")
+      if($(evaluate) == "default") {
+        println("Training model...")
+        val model = train(corpus)
+        println("Saving model...")
+        save(model)
+        println(" Saved.")
+        println("Done.")
+      }
+      else {
+        val evaluator: Evaluator = $(evaluate) match {
+          case _ if $(evaluate) == "cv" => new CrossValidation($(numFolds))
+          case _ if $(evaluate) == "dc" => new DiscussionCompletion()
+          case _ if $(evaluate) == "train-test" => new TrainTestSplit($(trainTestSplitP))
+        }
+        val alg: TMAlgorithm = $(algorithm) match {
+          case _ if $(algorithm) == "lda" => null
+          case _ if $(algorithm) == "ntfm" => new NTFMAlgorithm()
+              .setNumTopics($(numTopics))
+              .setNumIterations($(numIterations))
+          case _ if $(algorithm) == "uatfm" => new UATFMAlgorithm()
+              .setNumTopics($(numTopics))
+              .setNumUserGroups($(numUserGroups))
+              .setNumIterations($(numIterations))
+              .setMaxEIterations($(maxEIterations))
+          case _ if $(algorithm) == "mmtfm" => null
+        }
+        evaluator.run(corpus, alg)
+      }
     }
   }
 }
