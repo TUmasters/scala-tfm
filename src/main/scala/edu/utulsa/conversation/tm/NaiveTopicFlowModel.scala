@@ -9,7 +9,7 @@ import org.json4s.native.Serialization
 import org.json4s.native.Serialization.write
 import java.io.PrintWriter
 
-import edu.utulsa.conversation.text.{Corpus, Dictionary, Document}
+import edu.utulsa.conversation.text.{Corpus, Dictionary, Document, DocumentNode}
 import edu.utulsa.conversation.util._
 
 sealed trait NTFMParams {
@@ -53,8 +53,67 @@ class NaiveTopicFlowModel
   }
 
   override def likelihood(corpus: Corpus): Double = {
-    val (trees, nodes) = NTFMInfer.build(corpus)
-    trees.map(_.loglikelihood).sum
+    // This is incorrect
+//    val (trees, nodes) = NTFMInfer.build(corpus)
+//    trees.map(_.loglikelihood).sum
+    val numSamples: Int = 100
+    val zy = log(normalize(theta, Axis._0, 1.0))
+    /**
+      * Sequential Importance Sampling method
+      * Based on https://www.irisa.fr/aspi/legland/ensta/ref/doucet00b.pdf
+      */
+    class SISNode(override val document: Document, override val index: Int)
+      extends DocumentNode[SISNode](document, index) {
+      // p(z|w)
+      lazy val probZW: DenseVector[Double] = {
+        if(document.words.nonEmpty)
+          document.count
+          .map { case (word, count) =>
+            zy(word, ::).t * count.toDouble
+          }.reduce(_ + _)
+        else
+          DenseVector.zeros[Double](K)
+      }
+      // p(w|z)
+      lazy val probWZ: DenseVector[Double] = {
+        if(document.words.nonEmpty)
+          document.count
+            .map { case (word, count) =>
+              //println((!logTheta)(word, ::))
+              (!logTheta)(word, ::).t * count.toDouble
+            }
+            .reduce(_ + _)
+        else
+          DenseVector.zeros[Double](K)
+      }
+      def sis(parentTopic: Option[Int] = None): (Double, Double) = {
+        import math._
+        val iDist = parentTopic match {
+          case Some(zp) =>
+            normalize(a(zp, ::) :* probZW, 1.0)
+          case None =>
+            normalize(pi :* probZW, 1.0)
+        }
+        val z: Int = sample(iDist.toArray.zipWithIndex.map { case (p, i) => (i, p)}.toMap)
+        val w: Double = probWZ(z) - log(probZW(z))
+        val f = parentTopic match {
+          case Some(zp) => log(a(zp, z))
+          case None => log(pi(z))
+        }
+        if(replies.nonEmpty) {
+          val r = replies.map(_.sis(Some(z))).unzip
+          (f + r._1.sum, w + r._2.sum)
+        }
+        else (f, w)
+      }
+    }
+    val nodes = corpus.extend(new SISNode(_, _))
+    val roots = nodes.filter(_.isRoot)
+    val score: Double = roots.map(root => {
+      val (fs, wus) = (1 until numSamples).map(_ => root.sis()).unzip
+      1d
+    }).sum
+    score
   }
 }
 
@@ -113,11 +172,17 @@ class NTFMOptimizer
   private val b: CSCMatrix[Double] = {
     val builder = new CSCMatrix.Builder[Double](N, N)
 
-    corpus.replies.zipWithIndex.foreach { case (document: Document, source: Int) =>
-      document.replies.foreach { case (reply: Document) =>
-        builder.add(corpus.index(document), corpus.index(reply), 1d)
-      }
-    }
+    corpus.foreach(document =>
+      if(corpus.replies.contains(document))
+        corpus.replies(document).foreach(reply =>
+            builder.add(corpus.index(document), corpus.index(reply), 1d)
+        )
+    )
+//    corpus.zipWithIndex.foreach { case (document: Document, source: Int) =>
+//      document.replies.foreach { case (reply: Document) =>
+//        builder.add(corpus.index(document), corpus.index(reply), 1d)
+//      }
+//    }
 
     builder.result()
   }
@@ -188,41 +253,25 @@ class NTFMOptimizer
 
 object NTFMInfer {
   def build(corpus: Corpus)(implicit params: NTFMParams, counter: ParamCounter): (Seq[DTree], Seq[DNode]) = {
-    val nodes: Seq[DNode] = corpus.map((document) =>
-      new DNode(document, corpus.index(document))
-    ).toSeq
-    nodes.foreach { (node) =>
-      val d = node.document
-      d.parent match {
-        case Some(parent) => node.parent = nodes(corpus.index(parent))
-        case None =>
-      }
-      node.children = d.replies.map((c) => nodes(corpus.index(c)))
-    }
-    val trees = nodes.filter((node) => node.parent == null)
-      .map((node) => new DTree(node))
+    val nodes: Seq[DNode] = corpus.extend { case (d, i) => new DNode(d, i) }
+    val trees: Seq[DTree] = nodes.filter(_.parent.isEmpty).map(new DTree(_))
     (trees, nodes)
   }
 
   /**
     * Inference on documents.
     */
-  sealed class DNode(val document: Document, val index: Int)(implicit val params: NTFMParams) {
+  sealed class DNode(override val document: Document, override val index: Int)(implicit val params: NTFMParams)
+    extends DocumentNode[DNode](document, index) {
     import math._
     import params._
-    var parent: DNode = _
-    var children: Seq[DNode] = Seq()
 
     lazy val siblings: Seq[DNode] = {
-      if (parent != null) {
-        parent.children.filter((child) => child != this)
-      }
-      else {
-        Seq()
+      parent match {
+        case None => Seq()
+        case Some(p) => p.replies.filter(child => child != this)
       }
     }
-
-    def isRoot: Boolean = this.parent == null
 
     /**
       * Computes log probabilities for observing a set of words for each latent
@@ -245,8 +294,8 @@ object NTFMInfer {
       val msg1 = !probW
       // Lambda messages from children
       var msg2 = DenseVector.zeros[Double](K)
-      if (children.nonEmpty) {
-        msg2 = children
+      if (replies.nonEmpty) {
+        msg2 = replies
           .map((child) => !child.lambdaMsg)
           .reduce(_ + _)
       }
@@ -258,15 +307,14 @@ object NTFMInfer {
     }
 
     val tau: Param[DenseVector[Double]] = Param {
-      if (parent == null) {
-        !logPi
-      }
-      else {
-        val msg1: DenseVector[Double] = !parent.tau
-        val msg2 = siblings
-          .map((sibling) => !sibling.lambdaMsg)
-          .fold(DenseVector.zeros[Double](K))(_ + _)
-        msg1 + msg2
+      parent match {
+        case None => !logPi
+        case Some(p) =>
+          val msg1: DenseVector[Double] = !p.tau
+          val msg2 = siblings
+            .map((sibling) => !sibling.lambdaMsg)
+            .fold(DenseVector.zeros[Double](K))(_ + _)
+          msg1 + msg2
       }
     }
 
@@ -280,26 +328,22 @@ object NTFMInfer {
       .default { normalize(DenseVector.rand[Double](K), 1.0) }
 
     val loglikelihood: Param[Double] = Param {
-      if(parent == null)
-        lse(!logPi :+ !probW)
-      else
-        lse(log(((!parent.z) .t * a).t) :+ !probW)
+      parent match {
+        case None => lse(!logPi :+ !probW)
+        case Some(p) => lse(log(((!p.z) .t * a).t) :+ !probW)
+      }
     }
   }
 
   sealed class DTree(val root: DNode) {
     private def expand(node: DNode): Seq[DNode] = {
       val children =
-        if (node.children != null) node.children.flatMap((child) => expand(child))
+        if (node.replies.nonEmpty) node.replies.flatMap((child) => expand(child))
         else Seq()
       Seq(node) ++ children
     }
 
     lazy val nodes: Seq[DNode] = expand(root)
-
-    //  def update(): Unit = {
-    //    nodes.foreach { (node) => q(::, node.index) := !node.z }
-    //  }
 
     def loglikelihood: Double = {
       nodes.map { node =>
