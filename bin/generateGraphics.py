@@ -4,6 +4,8 @@ import json
 import sys
 import os
 from _utils import *
+import numpy as np
+import csv
 
 
 # Set default parameter names
@@ -97,32 +99,53 @@ if protocol == 'plsa':
         latex = latexHeader+latexColor+latexDoc
         with open(output+str(i)+"/figure.tex", 'w') as f:
             f.write(latex)
-    
+
         os.system("dot -Tpdf " + output + str(i) + "/conversation.dot -o " + output + str(i) + "/conversation.pdf")
         os.system('pdflatex -interaction=nonstopmode -output-directory ' + output+str(i)+"/ " + output+str(i) + "/figure.tex > /dev/null")
 else:
     with open(root+'/'+protocol+'/document-topics.json', 'r') as f:
         documentTopics = json.load(f)
-    with open(root+'/'+protocol+'/word-topics.json', 'r') as f:
-        wordTopics = json.load(f)
-    with open(root+'/'+protocol+'/params.json', 'r') as f:
+    # with open(root+'/'+protocol+'/word-topics.json', 'r') as f:
+    #     wordTopics = json.load(f)
+    with open(root + '/corpus/words.csv', 'r') as f:
+        wreader = csv.reader(f, delimiter=' ', skipinitialspace=True)
+        words = {}
+        for row in wreader:
+            words[row[1]] = int(row[0])
+    with open(root + '/' + protocol + '/theta.mat', 'r') as f:
+        theta = np.loadtxt(f, delimiter=",")
+    with open(root + '/' + protocol + '/params.json', 'r') as f:
         params = json.load(f)
+
+    # Estimate topic probabilities
+    pi = np.zeros(params['num-topics'])
+    for comment in documentTopics.values():
+        pi[comment[0]['topic']] += 1
+    pi /= len(documentTopics)
+
+    stheta = theta * pi
+    stheta = stheta / np.sum(stheta, axis=0)
+
     # Construct list of word topics
     topics = []
-    for i in range(params['num-topics']):
-        topics.append([])
-    for w in wordTopics:
-        for param in wordTopics[w]:
-            topics[param['topic']].append((param['p'],w))
+    for k in range(params['num-topics']):
+        topics.append([(stheta[w_id, k], w) for w, w_id in words.items()])
+    # for w in wordTopics:
+    #     for param in wordTopics[w]:
+    #         topics[param['topic']].append((param['p'],w))
     for i in range(len(topics)):
         topics[i].sort()
         topics[i].reverse()
     # Construct colors
     colors = [random_color() for _ in range(params['num-topics'])]
     # Now we start generating graphics
-    for i in range(len(roots)):
+    for i, root in enumerate(roots):
         if i % 100 == 0:
             print("Working on batch ", int(i/100), "of", int(len(roots)/100), "...")
+        if root.size <= 2:
+            continue
+        if len(root.topic_span(documentTopics)) <= 1:
+            continue
         if not os.path.isdir(output+str(i)):
             os.mkdir(output+str(i))
         # Generate Graphviz Header
@@ -141,11 +164,11 @@ else:
         # Generate Latex Document Header
         latexDoc = "\\begin{document}\n"
         latexDoc += "\\begin{center}\n"
-        latexDoc += "\\includegraphics{" + output+str(i)+"/conversation.pdf}\n"
+        latexDoc += "\\includegraphics[width=0.9\\textwidth,height=0.9\\textheight,keepaspectratio]{" + output+str(i)+"/conversation.pdf}\n"
         latexDoc += "\\end{center}\n"
-        commentDict = {roots[i].id: 0}
+        commentDict = {root.id: 0}
         numColors = 0
-        for comment in roots[i]:
+        for comment in root:
             # Generate Latex Document
             latexDoc += "\\begin{spverbatim}\n"+str(commentDict[comment.id]) + " " + rawComments[comment.id].content + "\n\\end{spverbatim}+\\hfill\\break\\hfill\\break\n"
             # Generate colors for topic
@@ -173,6 +196,6 @@ else:
         latex = latexHeader+latexColor+latexDoc
         with open(output+str(i)+"/figure.tex", 'w') as f:
             f.write(latex)
-    
+
         os.system("dot -Tpdf " + output + str(i) + "/conversation.dot -o " + output + str(i) + "/conversation.pdf")
         os.system('pdflatex -interaction=nonstopmode -output-directory ' + output+str(i)+"/ " + output+str(i) + "/figure.tex > /dev/null")

@@ -1,6 +1,8 @@
 import itertools
 from collections import deque
 import random
+from operator import or_
+import functools
 
 
 class Comment:
@@ -26,8 +28,17 @@ class Comment:
     def collect(self):
         return [self.id] + list(itertools.chain(*[reply.collect() for reply in self.replies]))
 
+    @property
     def size(self):
-        return 1 + sum([reply.size() for reply in self.replies])
+        return 1 + sum([reply.size for reply in self.replies])
+
+    def topic_span(self, topics):
+        if self.replies:
+            reply_span = functools.reduce(or_, [reply.topic_span(topics) for reply in self.replies])
+        else:
+            reply_span = set([])
+        return set([topics[self.id][0]['topic']]).union(reply_span)
+
     def __iter__(self):
         q = deque([])
         q.append(self)
@@ -36,7 +47,6 @@ class Comment:
             for com in item.replies:
                 q.append(com)
             yield item
-        
 
 
 def create_comment(d):
