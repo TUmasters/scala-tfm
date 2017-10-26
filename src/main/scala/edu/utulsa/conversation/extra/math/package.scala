@@ -1,16 +1,11 @@
-package edu.utulsa.conversation.util
+package edu.utulsa.conversation.extra
 
 import java.io.{File, PrintWriter}
 
 import breeze.linalg._
 import breeze.numerics.{exp, log}
 
-import scala.util.Random
-
-object math {
-
-  val rand = new Random()
-
+package object math {
   def lse(x: Array[Double]): Double = {
     val m = x.max
     log(x.map(xi => exp(xi - m)).sum) + m

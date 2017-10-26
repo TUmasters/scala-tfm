@@ -2,7 +2,7 @@ package edu.utulsa.conversation.eval
 import breeze.numerics.log
 import edu.utulsa.conversation.text.Corpus
 import edu.utulsa.conversation.tm.TMAlgorithm
-import edu.utulsa.conversation.util.math._
+import edu.utulsa.conversation.extra.math._
 
 import scala.util.Random
 
@@ -19,11 +19,12 @@ class CrossValidation(val numFolds: Int) extends Evaluator {
   require(numFolds > 0, "numFolds must be positive.")
 
   private def split(corpus: Corpus): Seq[Corpus] = {
-    rand.shuffle(corpus.roots.toList)
+    rand.shuffle(corpus.toList)
       .zipWithIndex
       .groupBy(_._2 % numFolds)
-      .map(_._2.flatMap(_._1.collect))
-      .map((documents) => new Corpus(documents, corpus.words, corpus.authors))
+      .map(_._2.map(_._1))
+      //.map(_._2.flatMap(_._1.collect))
+      .map((documents) => Corpus(documents, corpus.words, corpus.authors))
       .toSeq
   }
   private def evaluate(train: Corpus, test: Corpus, algorithm: TMAlgorithm): Double = {

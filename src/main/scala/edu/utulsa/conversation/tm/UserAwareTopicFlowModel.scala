@@ -11,7 +11,7 @@ import org.json4s.native.Serialization.write
 import java.io.PrintWriter
 
 import edu.utulsa.conversation.text.{Corpus, Dictionary, Document}
-import edu.utulsa.conversation.util.{math, Param, ParamCounter}
+import edu.utulsa.conversation.extra.{math, Term, ParamCounter}
 import spire.math.poly.Term
 
 trait UATFMParams {
@@ -21,12 +21,12 @@ trait UATFMParams {
   val K: Int
   val G: Int
   val pi: Array[DenseVector[Double]]
-  val logPi: Param[Array[DenseVector[Double]]] = Param {
+  val logPi: Term[Array[DenseVector[Double]]] = Term {
     pi.map(log(_))
   }(counters._2)
   val a: Array[DenseMatrix[Double]]
   val theta: DenseMatrix[Double]
-  val logTheta: Param[DenseMatrix[Double]] = Param {
+  val logTheta: Term[DenseMatrix[Double]] = Term {
     log(theta)
   }(counters._2)
   val r: DenseMatrix[Double]
@@ -270,7 +270,7 @@ object UATFMInfer {
     import math._
 
     var documents: Seq[DNode] = Seq()
-    val r: Param[DenseVector[Double]] = Param {
+    val r: Term[DenseVector[Double]] = Term {
       val oldR = r.value.copy
       val n = documents.map { case (node) =>
         if (node.isRoot)
@@ -286,7 +286,7 @@ object UATFMInfer {
       val newR = exp(n :- lse(n))
       dist = norm(oldR - newR)
       newR
-    }.default { DenseVector.rand[Double](G) }
+    }.initialize { DenseVector.rand[Double](G) }
 
     var dist: Double = G
 
@@ -329,7 +329,7 @@ object UATFMInfer {
       * Computes log probabilities for observing a set of words for each latent
       * class.
       */
-    val probW: Param[DenseVector[Double]] = Param {
+    val probW: Term[DenseVector[Double]] = Term {
       val result =
         if (document.words.nonEmpty)
           document.count
@@ -340,11 +340,11 @@ object UATFMInfer {
       result
     }
 
-    val lambdaMsg: Param[DenseVector[Double]] = Param {
+    val lambdaMsg: Term[DenseVector[Double]] = Term {
       lse((0 until G).map((g) => lse(a(g), !lambda) :+ log((!unode.r)(g))).toArray)
     }
 
-    val lambda: Param[DenseVector[Double]] = Param {
+    val lambda: Term[DenseVector[Double]] = Term {
       // Lambda messages regarding likelihood of observing the document
       val msg1 = !probW
       // Lambda messages from children
@@ -358,7 +358,7 @@ object UATFMInfer {
       msg1 + msg2
     }
 
-    val tau: Param[DenseVector[Double]] = Param {
+    val tau: Term[DenseVector[Double]] = Term {
       implicit val tmp: UATFMParams = params
       if (parent == null) {
         lse((!logPi).zipWithIndex.map { case (pi_g, g) =>
@@ -376,13 +376,13 @@ object UATFMInfer {
 
     var dist: Double = K
 
-    val z: Param[DenseVector[Double]] = Param {
+    val z: Term[DenseVector[Double]] = Term {
       val oldZ = z.value
       val tmp = !lambda :+ !tau
       val newZ = exp(tmp :- lse(tmp))
       dist = norm(oldZ - newZ)
       newZ
-    }.default { DenseVector.rand[Double](K) }
+    }.initialize { DenseVector.rand[Double](K) }
 
 //    def update(): Unit = {
 //      val old_q = q_d.get
@@ -391,7 +391,7 @@ object UATFMInfer {
 //        dist = norm(old_q - q_d())
 //    }
 
-    val loglikelihood: Param[Double] = Param {
+    val loglikelihood: Term[Double] = Term {
       if(parent == null)
         lse(pi.zipWithIndex.map { case (pi, g) => lse(!probW :+ log(pi * (!unode.r)(g))) })
       else

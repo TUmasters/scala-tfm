@@ -30,6 +30,8 @@ class Corpus private (
 //  lazy val id2doc: Map[String, Document] = documents.map((d) => d.id -> d).toMap
   lazy val index: Map[Document, Int] = documents.zipWithIndex.toMap
 
+  lazy val roots: Seq[Document] = documents.filter(_.parentId == null)
+
   override def size: Int = documents.size
   override def iterator: Iterator[Document] = documents.iterator
 

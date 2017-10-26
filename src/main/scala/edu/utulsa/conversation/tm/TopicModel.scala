@@ -4,6 +4,7 @@ import java.io.{File, PrintWriter}
 
 import breeze.linalg._
 import breeze.numerics.log
+import edu.utulsa.conversation.params.{Parameter, Params, validators}
 import edu.utulsa.conversation.text.{Corpus, Dictionary}
 
 import scala.collection.mutable
@@ -11,25 +12,15 @@ import scala.collection.mutable
 case class TPair(p: Double, topic: Int)
 case class DocumentTopic(id: String, topics: List[TPair])
 
-abstract class TMAlgorithm {
-  class Parameter[T](val default: T) {
-    var value: Option[T] = None
-    def :=(value: T): TMAlgorithm.this.type = {
-      this.value = Some(value)
-      TMAlgorithm.this
-    }
-  }
-  def $[T](param: Parameter[T]): T = {
-    param.value match {
-      case Some(value) => value
-      case None => param.default
-    }
-  }
+abstract class TMAlgorithm[TM <: TopicModel](implicit val $: Params) {
+  protected val numTopics: Parameter[Int] = Parameter[Int](
+    "num-topics",
+    """The number of topics that the model will be trained on.""",
+    validation = validators.INT_GEQ(1),
+    default = 10
+  )
 
-
-  val numTopics: Parameter[Int] = new Parameter(10)
-  def setNumTopics(value: Int): this.type = numTopics := value
-  def train(corpus: Corpus): TopicModel
+  def train(corpus: Corpus): TM
 }
 
 abstract class TopicModel

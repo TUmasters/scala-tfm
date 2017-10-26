@@ -10,7 +10,7 @@ import org.json4s.native.Serialization.write
 import java.io.PrintWriter
 
 import edu.utulsa.conversation.text.{Corpus, Dictionary, Document, DocumentNode}
-import edu.utulsa.conversation.util._
+import edu.utulsa.conversation.extra._
 
 sealed trait NTFMParams {
   implicit val modelParams: this.type = this
@@ -18,15 +18,15 @@ sealed trait NTFMParams {
   val M: Int
   val K: Int
   val pi: DenseVector[Double]
-  val logPi: Param[DenseVector[Double]] = Param {
+  val logPi: Term[DenseVector[Double]] = Term {
     log(pi)
   }
   val a: DenseMatrix[Double]
-  val logA: Param[DenseMatrix[Double]] = Param {
+  val logA: Term[DenseMatrix[Double]] = Term {
     log(a)
   }
   val theta: DenseMatrix[Double]
-  val logTheta: Param[DenseMatrix[Double]] = Param {
+  val logTheta: Term[DenseMatrix[Double]] = Term {
     log(theta)
   }
 }
@@ -277,7 +277,7 @@ object NTFMInfer {
       * Computes log probabilities for observing a set of words for each latent
       * class.
       */
-    val probW: Param[DenseVector[Double]] = Param {
+    val probW: Term[DenseVector[Double]] = Term {
       if(document.words.nonEmpty)
         document.count
           .map { case (word, count) =>
@@ -289,7 +289,7 @@ object NTFMInfer {
         DenseVector.zeros[Double](K)
     }
 
-    val lambda: Param[DenseVector[Double]] = Param {
+    val lambda: Term[DenseVector[Double]] = Term {
       // Lambda messages regarding likelihood of observing the document
       val msg1 = !probW
       // Lambda messages from children
@@ -302,11 +302,11 @@ object NTFMInfer {
       msg1 :+ msg2
     }
 
-    val lambdaMsg: Param[DenseVector[Double]] = Param {
+    val lambdaMsg: Term[DenseVector[Double]] = Term {
       lse(a, !lambda)
     }
 
-    val tau: Param[DenseVector[Double]] = Param {
+    val tau: Term[DenseVector[Double]] = Term {
       parent match {
         case None => !logPi
         case Some(p) =>
@@ -318,16 +318,16 @@ object NTFMInfer {
       }
     }
 
-    val qi: Param[DenseVector[Double]] = Param {
+    val qi: Term[DenseVector[Double]] = Term {
       !lambda :+ !tau
     }
 
-    val z: Param[DenseVector[Double]] = Param {
+    val z: Term[DenseVector[Double]] = Term {
       exp(!qi :- lse(!qi))
     }
-      .default { normalize(DenseVector.rand[Double](K), 1.0) }
+      .initialize { normalize(DenseVector.rand[Double](K), 1.0) }
 
-    val loglikelihood: Param[Double] = Param {
+    val loglikelihood: Term[Double] = Term {
       parent match {
         case None => lse(!logPi :+ !probW)
         case Some(p) => lse(log(((!p.z) .t * a).t) :+ !probW)
