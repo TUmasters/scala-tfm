@@ -51,7 +51,13 @@ class Document:
 
     @cached_property
     def filtered_content(self):
-        pass
+        content = self.content
+        lines = content.split('\n')
+        for i, line in enumerate(lines):
+            ## remove quotes
+            if len(line) > 0 and line[0] == '>':
+                lines[i] = ""
+        return ' '.join(lines)
 
     @cached_property
     def is_root(self):

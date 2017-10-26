@@ -44,18 +44,21 @@ dep_parser = StanfordDependencyParser() # model_path='edu/stanford/nlp/models/pa
 
 import random, itertools
 
-def split_document(content):
-    lines = content.split('\n')
-    sentences = list(itertools.chain(*[sent_tokenize(line) for line in lines if line]))
-    return sentences
+# def split_document(content):
+#     lines = content.split('\n')
+#     sentences = list(itertools.chain(*[sent_tokenize(line) for line in lines if line]))
+#     return [[sent] for sent in sentences]
 
 def test_document():
     document = random.choice(corpus)
     print(document)
 
-    sentences = split_document(document.content)
+    sentences = [[sent] for sent in sent_tokenize(document.filtered_content)]
     print(sentences)
-    tag = tagger.tag(sentences)
-    parses = [list(parse)[0] for parse in dep_parser.parse_sents(tag)]
-
+    # tag = tagger.tag(sentences)
+    # parse = list(dep_parser.parse([sentences[0]]))[0]
+    # parse.tree().draw()
+    parses = [list(parse)[0] for parse in dep_parser.parse_sents(sentences)]
     parses[0].tree().draw()
+
+test_document()
