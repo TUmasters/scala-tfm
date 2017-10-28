@@ -1,4 +1,4 @@
-package edu.utulsa.conversation.params
+package edu.utulsa.cli
 
 import java.io.File
 
@@ -21,9 +21,9 @@ package object validators {
   def INT_LEQ(bound: Int): Validation[Int] =
     (value: Int) => value <= bound
 
-  val IS_FILE: Validation[String] =
-    (value: String) => new File(value).isFile
+  val IS_FILE: Validation[File] =
+    (value: File) => value.isFile
 
-  val IS_DIRECTORY: Validation[String] =
-    (value: String) => new File(value).isDirectory
+  val IS_DIRECTORY: Validation[File] =
+    (value: File) => value.isDirectory
 }

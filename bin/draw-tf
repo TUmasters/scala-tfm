@@ -1,0 +1,174 @@
+#!/usr/bin/env python3
+
+
+## CLI
+
+import os, sys, shutil, argparse
+import random, math
+
+parser = argparse.ArgumentParser(description='Parses a series of text documents into a better format.')
+parser.add_argument('data_path', type=str, metavar='D', help='data folder.')
+parser.add_argument('model', type=str, metavar='D', help='topic flow model.')
+args = parser.parse_args()
+
+
+## Load documents
+
+data_path = args.data_path.rstrip('/')
+model_path = data_path + '/' + args.model
+
+data_file = data_path + '/raw.json'
+document_topics_file = model_path + '/' + 'document-topics.json'
+word_topics_file = model_path + '/' + 'word-topics.json'
+model_params_file = model_path + '/' + 'params.json'
+
+## Construct conversation tree
+
+from _document import parse_corpus, find_roots, prune
+import json
+
+document_data = json.load(open(data_file, 'r'))
+document_topics = json.load(open(document_topics_file, 'r'))
+word_topics = json.load(open(word_topics_file, 'r'))
+model_params = json.load(open(model_params_file, 'r'))
+
+
+num_topics = model_params['num-topics']
+num_words = model_params['num-words']
+
+corpus = parse_corpus(document_data)
+
+to_prune = [d for d in corpus if not d.id in document_topics.keys()]
+
+corpus = prune(corpus, to_prune)
+
+roots = find_roots(corpus)
+roots = [root for root in roots if root.size >= 3]
+
+
+d_topic = {key:max(values, key=lambda x: x['p'])['topic']
+           for key, values in document_topics.items()}
+d_topic_p = {key:next(x['p'] for x in values if x['topic'] == d_topic[key])
+             for key, values in document_topics.items()}
+
+## Calculate word weights
+
+import numpy as np
+
+words = list(word_topics.keys())
+word2idx = {word:idx for idx, word in enumerate(words)}
+word_weights = np.zeros((num_words, num_topics))
+
+for word, topics in word_topics.items():
+    i = word2idx[word]
+    row = np.array([t['p'] for t in sorted(topics, key=lambda x: x['topic'])])
+    word_weights[i,:] = np.sqrt(row)
+
+## HTML Templates
+
+from string import Template
+
+main_template = Template(open('_templates/main.html').read())
+word_block_template = Template(open('_templates/word-block.html').read())
+document_block_template = Template(open('_templates/document-block.html').read())
+topic_style_template = Template("--topic-${topic}: #${color};\n")
+
+
+## Color styles of each topic
+
+# https://stackoverflow.com/a/876872
+def colors(n):
+    import colorsys
+    colors = []
+    hsv_tuples = [(x*1.0/n, 0.7, 0.7) for x in range(n)]
+    rgb_tuples = [[int(x * 255) for x in colorsys.hsv_to_rgb(*hsv)]
+                   for hsv in hsv_tuples]
+    for rgb in rgb_tuples:
+        html = ''.join(["{:02x}".format(x) for x in rgb])
+        colors += [html]
+    return colors
+
+topic_colors = colors(num_topics)
+topic_style = """:root {\n
+--topic-null: #000;
+"""
+for topic_id in range(num_topics):
+    topic_style += topic_style_template.substitute({
+        'topic': topic_id,
+        'color': topic_colors[topic_id]
+    })
+topic_style += "}\n"
+
+
+def topic_words(topic_id):
+    html = '<h1>words</h1><br /><div class="content">'
+
+    weights = {word:word_weights[word2idx[word], topic_id] for word in words}
+    max_weight = max(weights.values())
+    word_data = []
+    for word in words:
+        word_html = word_block_template.substitute({
+            'word': word,
+            'weight': max(weights[word] / max_weight, 0.25)
+        })
+        word_data += [(word_html, weights[word])]
+    sorted_words = sorted(word_data, key=lambda x:-x[1])[:100]
+    word_html = ' '.join([w[0] for w in sorted_words])
+    html += word_html
+    html += "</div>"
+    return html
+
+
+def topic_stats(topic_id):
+    html = '<h1>stats</h1><br /><div class="content">'
+    html += '</div>'
+    return html
+
+
+def sample_conversations(topic_id):
+    html = '<h1>conversations</h1><br /><div class="content">'
+    SAMPLE_SIZE = 100
+    documents_with_topic = set([d.id for d in corpus if d_topic[d.id] == topic_id])
+    new_roots = [root for root in roots
+                if not set(root.flatten_ids()).isdisjoint(documents_with_topic)]
+    if len(new_roots) > SAMPLE_SIZE:
+        new_roots = random.sample(new_roots, SAMPLE_SIZE)
+    for root in new_roots:
+        html += document_html(root)
+    html += '</div>'
+    return html
+
+def document_html(document):
+    if document.id in d_topic:
+        topic = d_topic[document.id]
+        topic_p = "{:.4f}".format(d_topic_p[document.id])
+    else:
+        topic = 'null'
+        topic_p = 0
+    return document_block_template.substitute({
+        'root': 'root' if document.is_root else '',
+        'topic': topic,
+        'topic_p': topic_p,
+        'author': document.author,
+        'content': document.content,
+        'replies': ''.join([document_html(reply) for reply in document.replies])
+    })
+
+web_path = model_path + '/web'
+if os.path.exists(web_path):
+    shutil.rmtree(web_path)
+os.makedirs(web_path)
+
+
+for topic_id in range(num_topics):
+    html = main_template.substitute({
+        'topic': topic_id,
+        'topic_style': topic_style,
+        'topic_words': topic_words(topic_id),
+        'topic_stats': topic_stats(topic_id),
+        'sample_conversations': sample_conversations(topic_id)
+    })
+    topic_filename = web_path + '/topic-' + str(topic_id) + '.html'
+    with open(topic_filename, 'w') as f:
+        f.write(html)
+        print("Wrote {}.".format(topic_filename))

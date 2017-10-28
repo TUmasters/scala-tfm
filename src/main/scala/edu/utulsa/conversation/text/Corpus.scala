@@ -7,9 +7,9 @@ import org.json4s.native.Serialization
 import org.json4s.native.Serialization.write
 
 class DocumentNode[T <: DocumentNode[T]](val document: Document, val index: Int) {
-  sealed var theParent: Option[T] = None
+  private[text] var theParent: Option[T] = None
   def parent: Option[T] = theParent
-  sealed var theReplies: Seq[T] = _
+  private[text] var theReplies: Seq[T] = _
   def replies: Seq[T] = theReplies
 
   def isRoot: Boolean = parent match {

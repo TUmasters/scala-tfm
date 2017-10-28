@@ -1,72 +1,73 @@
-package edu.utulsa.conversation.cli
+package edu.utulsa.conversation
 
-import edu.utulsa.conversation.tm._
 import java.io.File
 
-import edu.utulsa.conversation.eval._
-import edu.utulsa.conversation.params.{Parameter, Params, validators}
+import edu.utulsa.cli.{param, params, validators}
+import edu.utulsa.conversation.tm._
 import edu.utulsa.conversation.text.Corpus
 
-import scala.collection.mutable
-
 object Driver extends App {
-  implicit val $: Params = Params.parse(args)
+  implicit val $: params = params.parse(args)
 
-  private val corpusFile: Parameter[String] = Parameter[String](
-    "input-file",
-    """JSON-formatted file of documents. Must have the following structure:
+  private val corpusFile: param[File] = param("input-file")
+    .description("""JSON-formatted file of documents. Must have the following structure:
       | [ ..., {
       |  "id": <document-id>,
       |  "parent": <parent-document-id (null if no parent)>,
       |  "author": <author-id>,
       |  "words": [<word-1>, <word-2>, ..., <word-n>]
-      | }, ...]""".stripMargin,
-    validation=validators.IS_FILE
-  )
-  private val outputDir = Parameter[String](
-    "output-dir",
-    """Output directory. If empty, output is placed in the directory of the input file.""",
-    validation=validators.IS_DIRECTORY,
-    default={ new File($(corpusFile)).getParent() + "/" + $(algorithm) + "/" }
-  )
+      | }, ...]""".stripMargin)
+    .validation(validators.IS_FILE)
+    .register($)
+
+  private val actions: Seq[String] = Seq("train")
+  private val action: param[File] = param("action")
+    .description(
+      """Action to perform.
+      """.stripMargin)
+    .validation(validators.IN(actions))
+
   val algorithms: Seq[String] = Seq("lda", "ntfm", "uatfm", "mmtfm")
-  private val algorithm = Parameter[String](
-    "algorithm",
-    s"""Algorithm to use. Results are saved to a unique subdirectory.
+  private val algorithm: param[String] = param("algorithm")
+    .description(s"""Algorithm to use. Results are saved to a unique subdirectory.
        |
-       | Choices: {${algorithms.mkString(", ")}}""".stripMargin,
-    validation=validators.IN(algorithms)
-  )
+       | Choices: {${algorithms.mkString(", ")}}""".stripMargin)
+    .validation(validators.IN(algorithms))
 
   val evaluators: Seq[String] = Seq("default", "cv", "dc", "train-test")
-  private val evaluator: Parameter[String] = Parameter[String](
-    "evaluator",
-    s"""Method for evaluating model on the dataset.
+  private val evaluator: param[String] = param("evaluator")
+    .description(s"""Method for evaluating model on the dataset.
        |
        | Choices: {${algorithms.mkString(", ")}}
-     """.stripMargin
-  )
+     """.stripMargin)
+    .validation(validators.IN(evaluators))
+
+  private val outputDir: param[File] = param("output-dir")
+    .description("Output directory. Default: output is placed in the directory of the input file.")
+    .validation(validators.IS_DIRECTORY)
+    .default { new File($(corpusFile).getParent + "/" + $(algorithm) + "/") }
+    .register($)
 
   def loadCorpus() = {
-    Corpus.load(new File($(corpusFile)))
+    Corpus.load($(corpusFile))
   }
 
-//  def train(corpus: Corpus): TopicModel = {
-//    val model: TopicModel = $(algorithm) match {
+  def algorithm(corpus: Corpus): TMAlgorithm[_] = {
+    val model: TMAlgorithm[_] = $(algorithm) match {
+      case _ if $(algorithm) == "ntfm" =>
+        new NTFMAlgorithm
 //      case _ if $(algorithm) == "lda" =>
 //        LatentDirichletAllocation.train(corpus, $(numTopics), $(numIterations), $(maxAlphaIterations))
-//      case _ if $(algorithm) == "ntfm" =>
-//        NaiveTopicFlowModel.train(corpus, $(numTopics), $(numIterations))
 //      case _ if $(algorithm) == "uatfm" =>
 //        UserAwareTopicFlowModel.train(corpus, $(numTopics), $(numUserGroups), $(numIterations), $(maxEIterations))
 //      case _ if $(algorithm) == "mmtfm" =>
 //        MixedMembershipTopicFlowModel.train(corpus, $(numTopics), $(numIterations))
-//    }
-//      model
-//  }
+    }
+      model
+  }
 
   def save(model: TopicModel): Unit = {
-    model.save(new File($(outputDir)))
+    model.save()
   }
 
 //  println("Loading corpus...")

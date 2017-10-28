@@ -9,6 +9,7 @@ class Term[T] private(update: => T) {
     if(value.isEmpty) value = Some(update)
     value.get
   }
+  def unary_! : T = get
   def initialize(initialValue: => T): this.type = {
     value = Some(initialValue)
     this

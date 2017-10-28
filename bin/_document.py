@@ -51,7 +51,7 @@ class Document:
 
     @cached_property
     def filtered_content(self):
-        content = self.content
+        content = self.content.lower()
         lines = content.split('\n')
         for i, line in enumerate(lines):
             ## remove quotes
@@ -66,9 +66,19 @@ class Document:
     def flatten(self):
         return [self] + list(itertools.chain(*[reply.flatten() for reply in self.replies]))
 
+    def flatten_ids(self):
+        return [d.id for d in self.flatten()]
+
     @cached_property
     def size(self):
-        return 1 + sum([reply.size() for reply in self.replies])
+        return 1 + sum([reply.size for reply in self.replies])
+
+    @cached_property
+    def depth(self):
+        if len(self.replies) > 0:
+            return 1 + max([reply.depth for reply in self.replies])
+        else:
+            return 1
 
     def __repr__(self):
         return "({}){} {} [{}] \n\"\"\"\n{}\n\"\"\"".format(

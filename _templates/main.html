@@ -1,0 +1,93 @@
+<html>
+  <head>
+    <title>Topic ${topic}</title>
+    <style>
+     ${topic_style}
+
+     body {
+       width: 95%;
+       border-top: 10px solid var(--topic-${topic});
+       margin: auto;
+       padding: 0;
+     }
+
+     .section {
+       background-color: #F5F5F5;
+       margin: 5px;
+       padding: 5px;
+       border: 1px solid #888;
+     }
+
+     .section h1 {
+       padding: 0;
+       margin: 0;
+       font-size: 16;
+       display: inline;
+     }
+
+     .section .content {
+       margin-left: 8px;
+     }
+
+     #topic-words {
+     }
+
+     #topic-words .word-block {
+       display: inline;
+       padding: 2px;
+     }
+
+     #topic-stats {
+     }
+
+     #sample-conversations .document-block {
+       margin: 2px;
+       border-left: 2px solid #DDD;
+     }
+
+     #sample-conversations .document-block.root {
+       border-bottom: 3px solid #666;
+       margin-bottom: 10px;
+     }
+
+     #sample-conversations .document-block .headline {
+       height: 8px;
+     }
+
+     #sample-conversations .document-block .replies {
+       margin-left: 8px;
+       padding: 2px
+     }
+
+     #sample-conversations .document-block .author {
+       font-weight: bold;
+       display: inline;
+     }
+
+     #sample-conversations .document-block .topic {
+       display: inline;
+     }
+
+     #sample-conversations .document-block .content {
+       white-space: pre-wrap;
+       padding: 5px;
+       background-color: #F1F1F1;
+       border: 1px solid #AAA;
+     }
+    </style>
+  </head>
+  <body>
+    <center><h1>TOPIC ${topic}</h1></center>
+    <div id="topic-words" class="section">
+      ${topic_words}
+    </div>
+
+    <div id="topic-stats" class="section">
+      ${topic_stats}
+    </div>
+
+    <div id="sample-conversations" class="section">
+      ${sample_conversations}
+    </div>
+  </body>
+</html>
