@@ -76,7 +76,7 @@ stemmer = PorterStemmer()
 en_stopwords = stopwords.words('english')
 valid_tags = set(['VBD', 'VBP', 'NNS', 'NN', 'RP', 'VBZ', 'NNP', 'RB', 'JJR',
                   'VBN', 'VB', 'VBG', 'JJ'])
-invalid_words = set(["'s", "'m", "n't"])
+invalid_words = set(["'s", "'m", "n't", "'re", "(", ")", "[", "]", "’"])
 
 def check_tags():
     ## used to determine which tags to keep
@@ -139,6 +139,8 @@ for document, data in corpus_data.items():
         'parent': document.parent.id if document.parent else None
     })
 
+print("{:8d} documents".format(len(results)))
+print("{:8d} words".format(len(accept_words)))
 
 print("Writing to file...")
 with open(output_file, 'w') as f:

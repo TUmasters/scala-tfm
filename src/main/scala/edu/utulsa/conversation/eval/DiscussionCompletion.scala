@@ -1,7 +1,7 @@
 //package edu.utulsa.conversation.eval
 //import edu.utulsa.conversation.text.{Corpus, Document}
 //import edu.utulsa.conversation.tm.TMAlgorithm
-//import edu.utulsa.conversation.extra.math._
+//import edu.utulsa.util.math._
 //
 //class DCResults(val scores: Seq[Double], val levels: Seq[Int], val testSizes: Seq[Int]) extends EvaluatorResults {
 //  override def formatted: String = {

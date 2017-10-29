@@ -54,7 +54,9 @@ class Corpus private (
     val m: Map[Document, T] = n.map(t => t.document -> t).toMap
     n.foreach { t =>
       val d = t.document
-      t.theParent = Some(m(parent(d)))
+      if(parent contains d) {
+        t.theParent = Some(m(parent(d)))
+      }
       t.theReplies =
         if(replies.contains(d)) replies(d).map(m)
         else Seq()
@@ -108,10 +110,10 @@ object Corpus {
 
   def apply(documents: Seq[Document], words: Dictionary, authors: Dictionary): Corpus = {
     val m: Map[String, Document] = documents.map(d => d.id -> d).toMap
-    val replies: Map[Document, Seq[Document]] = m.values.groupBy(_.parentId).map {
+    val replies: Map[Document, Seq[Document]] = m.values.filter(_.parentId != null).groupBy(_.parentId).map {
       case (p, r) => m(p) -> r.toSeq
     }
-    val parent: Map[Document, Document] = m.values.map(d => d -> m(d.parentId)).toMap
+    val parent: Map[Document, Document] = m.values.filter(_.parentId != null).map(d => d -> m(d.parentId)).toMap
     new Corpus(m.values.toSeq, words, authors, replies, parent)
   }
 }

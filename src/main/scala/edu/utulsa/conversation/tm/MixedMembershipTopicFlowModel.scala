@@ -39,7 +39,7 @@
 //  val sigmaFactor: Double = 4.0
 //) extends TMOptimizer[MixedMembershipTopicFlowModel](corpus, numTopics) {
 //
-//  import edu.utulsa.conversation.extra.math._
+//  import edu.utulsa.util.math._
 //
 //  override def train(): MixedMembershipTopicFlowModel = ???
 //

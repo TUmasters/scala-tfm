@@ -13,8 +13,8 @@ case class param[T]
   def validation(method: T => Boolean): param[T] = copy(validate = method)
   def default(value: T): param[T] = copy(default = Some(value))
 
-  def register($: params)(implicit converter: ParamConverter[T]): this.type = {
-    $.add(this)
+  def register($: CLIParser)(implicit converter: ParamConverter[T]): this.type = {
+    $.register(this)
     this
   }
 
@@ -22,11 +22,12 @@ case class param[T]
   def optional: Boolean = default.isDefined
 }
 
-case class command[String]
-(
-name: String,
-description: Option[String] = None,
-method: () => Unit = ???
-) extends CLIOption {
-  def exec(method: => Unit): command[String] = copy(method = () => method)
-}
+//case class command[String]
+//(
+//name: String,
+//description: Option[String] = None,
+//method: () => Unit = ???
+//) extends CLIOption {
+//  def description(msg: String): command[String] = copy(description = Some(msg))
+//  def exec(method: => Unit): command[String] = copy(method = () => method)
+//}

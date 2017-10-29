@@ -9,26 +9,26 @@ import org.json4s.native.Serialization
 import org.json4s.native.Serialization.write
 import java.io.PrintWriter
 
-import edu.utulsa.cli.{param, params}
+import edu.utulsa.cli.{CLIParser, param}
 import edu.utulsa.conversation.text.{Corpus, Dictionary, Document, DocumentNode}
-import edu.utulsa.conversation.extra._
+import edu.utulsa.util._
+import edu.utulsa.util.Term
 
 class NaiveTopicFlowModel
 (
   override val numTopics: Int,
   override val corpus: Corpus,
-  override val outputDir: File,
   override val documentInfo: Map[String, List[TPair]] = Map(),
   override val wordInfo: Map[String, List[TPair]] = Map(),
   val pi: DenseVector[Double],
   val a: DenseMatrix[Double],
   val theta: DenseMatrix[Double]
-) extends TopicModel(numTopics, corpus, documentInfo, wordInfo, outputDir) with NTFMParams {
+) extends TopicModel(numTopics, corpus, documentInfo, wordInfo) with NTFMParams {
   override val M: Int = corpus.words.size
   override val K: Int = numTopics
 
   override def saveModel(dir: File): Unit = {
-    import math.csvwritevec
+    import edu.utulsa.util.math.csvwritevec
     dir.mkdirs()
     csvwritevec(new File(dir + "/pi.mat"), pi)
     csvwrite(new File(dir + "/a.mat"), a)
@@ -101,7 +101,7 @@ class NaiveTopicFlowModel
   }
 }
 
-class NTFMAlgorithm(implicit $: params) extends TMAlgorithm[NaiveTopicFlowModel] {
+class NTFMAlgorithm(implicit $: CLIParser) extends TMAlgorithm[NaiveTopicFlowModel] {
   val numIterations: param[Int] = param("num-iterations")
     .description("""Number of iterations to run the NTFM for.""")
     .default(10)
@@ -151,7 +151,7 @@ sealed class NTFMOptimizer
   val numTopics: Int,
   val numIterations: Int
 ) extends NTFMParams {
-  import math._
+  import edu.utulsa.util.math._
 
   val N: Int = corpus.documents.size
   val M: Int = corpus.words.size
@@ -209,13 +209,29 @@ sealed class NTFMOptimizer
 
   def train(): NaiveTopicFlowModel = {
     (1 to numIterations).foreach { (interval) =>
+      println(s"Interval $interval")
       eStep(interval)
       mStep(interval)
     }
-    val d: Map[String, List[TPair]] = nodes.map(node => {
+    println("Saving document topics...")
+    import edu.utulsa.util.iterable._
+    val d: Map[String, List[TPair]] = nodes.zipWithIndex.map { case (node, index) =>
+//      if(index % 1000 == 0) println(index)
+      val maxItem = (!node.z).toArray.zipWithIndex
+        .maxBy(_._1)
       node.document.id ->
-        q(::, node.index).toArray.zipWithIndex.map { case (p, i) => TPair(p, i) }.filter(_.p > 0.1).sortBy(-_.p).toList
-    }).toMap
+        List(TPair(maxItem._1, maxItem._2))
+//        (!node.z).iterator
+////          .map { case (p, i) => TPair(p, i) }
+////          .take(5)
+//          .filter(_._2 >= 1.0 / corpus.size)
+////          .topBy(10)(-_._2)
+//          .toArray
+//          .sortBy(-_._2)
+//          .take(5)
+//          .map(t => TPair(t._2, t._1)).toList
+    }.toMap
+    println("Saving word topics")
     val w: Map[String, List[TPair]] = (0 until M).map(w =>
       corpus.words(w) ->
         theta(w, ::).t.toArray.zipWithIndex.map { case (p, i) => TPair(p, i ) }.sortBy(-_.p).toList
@@ -229,7 +245,7 @@ sealed class NTFMOptimizer
 
   def eStep(interval: Int): Unit = {
     trees.par.foreach { case (tree) =>
-      tree.nodes.foreach { node => node.qi.reset() }
+      tree.nodes.foreach { node => node.reset() }
       tree.nodes.foreach { node => q(::, node.index) := !node.z }
     }
   }
@@ -269,7 +285,7 @@ object NTFMInfer {
     */
   sealed class DNode(override val document: Document, override val index: Int)(implicit val params: NTFMParams)
     extends DocumentNode[DNode](document, index) {
-    import edu.utulsa.conversation.extra.math._
+    import edu.utulsa.util.math._
     import params._
 
     lazy val siblings: Seq[DNode] = {

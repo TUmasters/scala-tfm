@@ -29,6 +29,25 @@
        margin-left: 8px;
      }
 
+     #nav {
+       height: 50px;
+     }
+
+     #nav a {
+       box-sizing: border-box;
+       -moz-box-sizing: border-box;
+       -webkit-box-sizing: border-box;
+       border: 1px solid white;
+       display: inline-block;
+       height: 50px;
+       text-decoration: none;
+       padding: 0;
+       margin: 0;
+     }
+
+     #nav a:hover {
+     }
+
      #topic-words {
      }
 
@@ -51,6 +70,7 @@
      }
 
      #sample-conversations .document-block .headline {
+       display: block;
        height: 8px;
      }
 
@@ -77,6 +97,9 @@
     </style>
   </head>
   <body>
+    <div id="nav">
+      ${topic_nav}
+    </div>
     <center><h1>TOPIC ${topic}</h1></center>
     <div id="topic-words" class="section">
       ${topic_words}

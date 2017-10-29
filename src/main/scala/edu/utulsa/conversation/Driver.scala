@@ -2,12 +2,12 @@ package edu.utulsa.conversation
 
 import java.io.File
 
-import edu.utulsa.cli.{param, params, validators}
+import edu.utulsa.cli.{param, CLIParser, validators}
 import edu.utulsa.conversation.tm._
 import edu.utulsa.conversation.text.Corpus
 
 object Driver extends App {
-  implicit val $: params = params.parse(args)
+  implicit val $: CLIParser = CLIParser.parse(args)
 
   private val corpusFile: param[File] = param("input-file")
     .description("""JSON-formatted file of documents. Must have the following structure:
@@ -21,11 +21,12 @@ object Driver extends App {
     .register($)
 
   private val actions: Seq[String] = Seq("train")
-  private val action: param[File] = param("action")
+  private val action: param[String] = param("action")
     .description(
       """Action to perform.
       """.stripMargin)
     .validation(validators.IN(actions))
+    .register($)
 
   val algorithms: Seq[String] = Seq("lda", "ntfm", "uatfm", "mmtfm")
   private val algorithm: param[String] = param("algorithm")
@@ -33,14 +34,17 @@ object Driver extends App {
        |
        | Choices: {${algorithms.mkString(", ")}}""".stripMargin)
     .validation(validators.IN(algorithms))
+    .register($)
 
-  val evaluators: Seq[String] = Seq("default", "cv", "dc", "train-test")
+  val evaluators: Seq[String] = Seq("cv", "dc", "train-test")
   private val evaluator: param[String] = param("evaluator")
     .description(s"""Method for evaluating model on the dataset.
        |
        | Choices: {${algorithms.mkString(", ")}}
      """.stripMargin)
     .validation(validators.IN(evaluators))
+    .default("cv")
+    .register($)
 
   private val outputDir: param[File] = param("output-dir")
     .description("Output directory. Default: output is placed in the directory of the input file.")
@@ -52,9 +56,9 @@ object Driver extends App {
     Corpus.load($(corpusFile))
   }
 
-  def algorithm(corpus: Corpus): TMAlgorithm[_] = {
-    val model: TMAlgorithm[_] = $(algorithm) match {
-      case _ if $(algorithm) == "ntfm" =>
+  def matchAlgorithm(algorithm: String): TMAlgorithm[_] = {
+    val model: TMAlgorithm[_] = algorithm match {
+      case "ntfm" =>
         new NTFMAlgorithm
 //      case _ if $(algorithm) == "lda" =>
 //        LatentDirichletAllocation.train(corpus, $(numTopics), $(numIterations), $(maxAlphaIterations))
@@ -67,9 +71,19 @@ object Driver extends App {
   }
 
   def save(model: TopicModel): Unit = {
-    model.save()
+    model.save($(outputDir))
   }
 
+  println("Loading corpus...")
+  val corpus = loadCorpus()
+  $(action) match {
+    case "train" =>
+      val tmAlgorithm: TMAlgorithm[_] = matchAlgorithm($(algorithm))
+      println("Training...")
+      val model: TopicModel = tmAlgorithm.train(corpus).asInstanceOf[TopicModel]
+      println("Saving to file...")
+      save(model)
+  }
 //  println("Loading corpus...")
 //  val corpus = loadCorpus()
 //  if ($(evaluator) == "default") {

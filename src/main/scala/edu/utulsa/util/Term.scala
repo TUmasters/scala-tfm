@@ -1,4 +1,4 @@
-package edu.utulsa.conversation.extra
+package edu.utulsa.util
 
 class Term[T] private(update: => T) {
   var value: Option[T] = None

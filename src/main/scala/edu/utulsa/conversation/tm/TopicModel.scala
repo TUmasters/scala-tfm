@@ -4,8 +4,7 @@ import java.io.{File, PrintWriter}
 
 import breeze.linalg._
 import breeze.numerics.log
-import edu.utulsa.cli.{param, params, validators}
-import edu.utulsa.conversation.params.{Parameter, validators}
+import edu.utulsa.cli.{param, CLIParser, validators}
 import edu.utulsa.conversation.text.{Corpus, Dictionary}
 
 import scala.collection.mutable
@@ -13,12 +12,12 @@ import scala.collection.mutable
 case class TPair(p: Double, topic: Int)
 case class DocumentTopic(id: String, topics: List[TPair])
 
-abstract class TMAlgorithm[TM <: TopicModel](implicit val $: params) {
-
+abstract class TMAlgorithm[TM <: TopicModel](implicit val $: CLIParser) {
   protected val numTopics: param[Int] = param("num-topics")
     .description("The number of topics that the model will be trained on.")
     .validation(validators.INT_GEQ(1))
     .default(10)
+    .register($)
 
   def train(corpus: Corpus): TM
 }

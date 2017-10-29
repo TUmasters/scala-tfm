@@ -33,7 +33,7 @@
 //  val beta: DenseMatrix[Double]
 //) extends TopicModel(numTopics, corpus, documentInfo, wordInfo) {
 //  override protected def saveModel(dir: File): Unit = {
-//    import edu.utulsa.conversation.extra.math.csvwritevec
+//    import edu.utulsa.util.math.csvwritevec
 //    csvwritevec(new File(dir + "/alpha.mat"), alpha)
 //    csvwrite(new File(dir + "/beta.mat"), beta)
 //  }
@@ -46,7 +46,7 @@
 //// Implementation of LDA based on Variational Inference EM algorithm
 //// given in http://www.cs.columbia.edu/~blei/papers/BleiLafferty2009.pdf
 //class LDA extends TMAlgorithm[LDAModel] {
-//  import edu.utulsa.conversation.extra.math._
+//  import edu.utulsa.util.math._
 //  import LDAParams._
 //
 //  def train(corpus: Corpus): LDAModel = {

@@ -55,8 +55,19 @@ class Document:
         lines = content.split('\n')
         for i, line in enumerate(lines):
             ## remove quotes
-            if len(line) > 0 and line[0] == '>':
-                lines[i] = ""
+            # if len(line) > 0 and line[0] == '>':
+            #     lines[i] = ""
+            line = re.sub('\s*>.*$', '', line)
+            ## remove reddit links
+            line = re.sub('\[(.*?)\]\(.*?\)', '\\1', line)
+            # remove links
+            # https://stackoverflow.com/a/3809435
+            line = re.sub('http\S+', '', line)
+            ## remove any reddit formatting junk
+            line = re.sub('[*^~]', '', line)
+            ## replace common words
+            line = re.sub('/?r/(\S{1,20})', 'r_\\1', line)
+            lines[i] = line
         return ' '.join(lines)
 
     @cached_property
@@ -92,9 +103,8 @@ def _create(document_json):
 
 def _expand(document, corpus):
     if document.reply_ids: ## if the corpus includes replies to the document
-        document.replies = [corpus[id] for id in document.reply_ids]
+        document.replies = set([corpus[id] for id in document.reply_ids])
         for reply in document.replies:
-            reply.parent_id = document.id
             reply.parent = document
     elif document.parent_id: ## if the corpus includes the parent of each document
         document.parent = corpus[document.parent_id]

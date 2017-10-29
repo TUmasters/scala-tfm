@@ -2,7 +2,7 @@
 //import breeze.numerics.log
 //import edu.utulsa.conversation.text.Corpus
 //import edu.utulsa.conversation.tm.TMAlgorithm
-//import edu.utulsa.conversation.extra.math._
+//import edu.utulsa.util.math._
 //
 //import scala.util.Random
 //
