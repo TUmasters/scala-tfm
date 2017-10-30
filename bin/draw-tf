@@ -27,13 +27,15 @@ model_params_file = model_path + '/' + 'params.json'
 
 from _document import parse_corpus, find_roots, prune
 import json
+import numpy as np
 
 document_raw = json.load(open(raw_file, 'r'))
 document_data = {data['id']:data for data in json.load(open(data_file, 'r'))}
 document_topics = json.load(open(document_topics_file, 'r'))
 word_topics = json.load(open(word_topics_file, 'r'))
 model_params = json.load(open(model_params_file, 'r'))
-
+a = np.loadtxt(model_path + '/a.mat', delimiter=',')
+pi = np.loadtxt(model_path + '/pi.mat', delimiter=',')
 
 num_topics = model_params['num-topics']
 num_words = model_params['num-words']
@@ -47,16 +49,12 @@ corpus = prune(corpus, to_prune)
 roots = find_roots(corpus)
 roots = [root for root in roots if root.size >= 3]
 
-# print(len(document_topics))
-# print(sum(1 for topics in document_topics.values() if len(topics)))
 d_topic = {key:max(values, key=lambda x: x['p'])['topic']
            for key, values in document_topics.items()}
 d_topic_p = {key:next(x['p'] for x in values if x['topic'] == d_topic[key])
              for key, values in document_topics.items()}
 
 ## Calculate word weights
-
-import numpy as np
 
 words = set(word_topics.keys())
 word2idx = {word:idx for idx, word in enumerate(words)}
@@ -98,6 +96,7 @@ def colors(n):
         colors += [html]
     return colors
 
+
 topic_colors = colors(num_topics)
 topic_style = """:root {\n
 --topic-null: #000;
@@ -112,7 +111,7 @@ topic_style += "}\n"
 
 topic_nav = ""
 for topic_id in range(num_topics):
-    topic_nav += '<a href="topic-{0}.html" style="width: {1}%; background-color:var(--topic-{0})"></a>'.format(
+    topic_nav += '<a href="topic-{0}.html" style="width: {1}%; background-color:var(--topic-{0})">{0}</a>'.format(
         topic_id,
         100./num_topics
     )
@@ -137,8 +136,24 @@ def topic_words(topic_id):
     return html
 
 
+def transition_stats(title, probs):
+    probs = sorted(enumerate(probs * 100), key=lambda x: -x[1])
+    html = '<p><b>{}</b>\n'.format(title)
+    for t2, p2 in probs:
+        html += """<a href="topic-{0}.html" class="topic" style="border-color: var(--topic-{0});">
+  <span>Topic {0} ({1:.4f}%)</span></a>""".format(t2, p2)
+    html += '</p>'
+    return html
+
 def topic_stats(topic_id):
     html = '<h1>stats</h1><br /><div class="content">'
+    in_probs = a[:, topic_id]
+    out_probs = a[topic_id, :]
+    in_degree = sum(in_probs)
+    html += '<p><b>entrance probability</b> {:.4f}</p>'.format(pi[topic_id])
+    html += '<p><b>weighted in-degree</b> {:.4f}</p>'.format(in_degree)
+    html += transition_stats('parent probabilities', in_probs)
+    html += transition_stats('response probabilities', out_probs)
     html += '</div>'
     return html
 
@@ -155,6 +170,7 @@ def sample_conversations(topic_id):
         html += document_html(root)
     html += '</div>'
     return html
+
 
 def document_html(document):
     if document.id in d_topic:
@@ -177,6 +193,7 @@ def document_html(document):
         'tokens': tokens,
         'replies': ''.join([document_html(reply) for reply in document.replies])
     })
+
 
 web_path = model_path + '/web'
 if os.path.exists(web_path):

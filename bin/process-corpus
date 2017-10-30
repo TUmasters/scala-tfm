@@ -76,7 +76,7 @@ stemmer = PorterStemmer()
 en_stopwords = stopwords.words('english')
 valid_tags = set(['VBD', 'VBP', 'NNS', 'NN', 'RP', 'VBZ', 'NNP', 'RB', 'JJR',
                   'VBN', 'VB', 'VBG', 'JJ'])
-invalid_words = set(["'s", "'m", "n't", "'re", "(", ")", "[", "]", "’"])
+invalid_words = set(["'s", "'m", "n't", "'re", "(", ")", "[", "]", "’", "%", "''", "``", "“", "”"])
 
 def check_tags():
     ## used to determine which tags to keep
@@ -122,7 +122,7 @@ for data in corpus_data.values():
 
 words = set(list(word_count.keys()))
 accept_words = set([word for word in words
-                    if word_count[word] >= 10
+                    if word_count[word] >= 20
                     and word_count[word] <= 0.2 * len(corpus)])
 
 
