@@ -16,10 +16,9 @@ class CLIParser(val positional: List[String], val optional: Map[String, String])
   def register[T](param: param[T])(implicit converter: ParamConverter[T]): Unit = {
     if(param.required) {
       val value: T = converter.decode(positional(i))
-      if(param.validate(value)) {
+      require(param.validate(value), s"Parameter '$value' is not a valid assignment for ${param.name}")
         s(param) = value
         i += 1
-      }
     }
     else {
       if(optional contains param.name) {

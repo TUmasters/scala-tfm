@@ -75,7 +75,7 @@ from nltk.corpus import stopwords
 stemmer = PorterStemmer()
 en_stopwords = stopwords.words('english')
 valid_tags = set(['VBD', 'VBP', 'NNS', 'NN', 'RP', 'VBZ', 'NNP', 'RB', 'JJR',
-                  'VBN', 'VB', 'VBG', 'JJ'])
+                  'VBN', 'VB', 'VBG', 'JJ', 'FW'])
 invalid_words = set(["'s", "'m", "n't", "'re", "(", ")", "[", "]", "’", "%", "''", "``", "“", "”"])
 
 def check_tags():

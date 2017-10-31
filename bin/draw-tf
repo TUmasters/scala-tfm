@@ -88,7 +88,7 @@ topic_style_template = Template("--topic-${topic}: #${color};\n")
 def colors(n):
     import colorsys
     colors = []
-    hsv_tuples = [(x*1.0/n, 0.7, 0.7) for x in range(n)]
+    hsv_tuples = [(x*0.9/n, 0.7, 0.7) for x in range(n)]
     rgb_tuples = [[int(x * 255) for x in colorsys.hsv_to_rgb(*hsv)]
                    for hsv in hsv_tuples]
     for rgb in rgb_tuples:
@@ -167,12 +167,12 @@ def sample_conversations(topic_id):
     if len(new_roots) > SAMPLE_SIZE:
         new_roots = random.sample(new_roots, SAMPLE_SIZE)
     for root in new_roots:
-        html += document_html(root)
+        html += document_html(root, topic_id)
     html += '</div>'
     return html
 
 
-def document_html(document):
+def document_html(document, main_topic_id):
     if document.id in d_topic:
         topic = d_topic[document.id]
         topic_p = "{:.2f}".format(d_topic_p[document.id] * 98)
@@ -186,12 +186,13 @@ def document_html(document):
         tokens = ' '.join('[<span>{}</span>]'.format(token) for token in tokens)
     return document_block_template.substitute({
         'root': 'root' if document.is_root else '',
+        'main_topic': 'main-topic' if topic == main_topic_id else '',
         'topic': topic,
         'topic_p': topic_p,
         'author': document.author,
         'content': document.content,
         'tokens': tokens,
-        'replies': ''.join([document_html(reply) for reply in document.replies])
+        'replies': ''.join([document_html(reply, main_topic_id) for reply in document.replies])
     })
 
 

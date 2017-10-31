@@ -22,9 +22,7 @@ object Driver extends App {
 
   private val actions: Seq[String] = Seq("train")
   private val action: param[String] = param("action")
-    .description(
-      """Action to perform.
-      """.stripMargin)
+    .description("Action to perform.")
     .validation(validators.IN(actions))
     .register($)
 
