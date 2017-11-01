@@ -29,9 +29,9 @@ import networkx as nx
 
 a = a - np.diag(np.diag(a))
 
-for i in range(a.shape[0]):
-    a[i, :] /= sum(a[i,:])
-    print(sum(a[i, :]))
+# for i in range(a.shape[0]):
+#     a[i, :] /= sum(a[i,:])
+#     print(sum(a[i, :]))
 
 g = nx.from_numpy_matrix(a, create_using=nx.MultiDiGraph())
 

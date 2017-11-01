@@ -5,6 +5,10 @@ class Term[T] private(update: => T) {
   def reset(): Unit = {
     value = None
   }
+  def forceUpdate(): T = {
+    reset()
+    get
+  }
   def get: T = synchronized {
     if(value.isEmpty) value = Some(update)
     value.get

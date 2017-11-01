@@ -46,7 +46,6 @@ object Driver extends App {
 
   private val outputDir: param[File] = param("output-dir")
     .description("Output directory. Default: output is placed in the directory of the input file.")
-    .validation(validators.IS_DIRECTORY)
     .default { new File($(corpusFile).getParent + "/" + $(algorithm) + "/") }
     .register($)
 

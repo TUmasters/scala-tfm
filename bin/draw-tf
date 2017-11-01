@@ -158,41 +158,62 @@ def topic_stats(topic_id):
     return html
 
 
+def sample_documents(topic_id):
+    html = '<h1>documents</h1><br /><div class="content">'
+    SAMPLE_SIZE = 100
+    new_corpus = [document for document in corpus if d_topic[document.id] == topic_id]
+    if len(new_corpus) > SAMPLE_SIZE:
+        new_corpus = random.sample(new_corpus, SAMPLE_SIZE)
+    for document in new_corpus:
+        if document.parent:
+            html += document_html(document.parent, topic_id, root=True, depth=2, child=document)
+        else:
+            html += document_html(document, topic_id, root=True, depth=1)
+    html += '</div>'
+    return html
+
+
 def sample_conversations(topic_id):
     html = '<h1>conversations</h1><br /><div class="content">'
-    SAMPLE_SIZE = 100
+    SAMPLE_SIZE = 20
     documents_with_topic = set([d.id for d in corpus if d_topic[d.id] == topic_id])
     new_roots = [root for root in roots
                 if not set(root.flatten_ids()).isdisjoint(documents_with_topic)]
     if len(new_roots) > SAMPLE_SIZE:
         new_roots = random.sample(new_roots, SAMPLE_SIZE)
     for root in new_roots:
-        html += document_html(root, topic_id)
+        html += document_html(root, topic_id, root=True)
     html += '</div>'
     return html
 
 
-def document_html(document, main_topic_id):
+def document_html(document, main_topic_id, root=False, child=None, depth=float('inf')):
     if document.id in d_topic:
         topic = d_topic[document.id]
         topic_p = "{:.2f}".format(d_topic_p[document.id] * 98)
         tokens = document_data[document.id]['words']
         tokens = ' '.join('<span style="font-size: {1:.4f};">[{0}]</span>'\
-                          .format(token, max(min(word_weights[word2idx[token], topic]*400, 24), 12), topic)
+                          .format(token, max(word_weights[word2idx[token], topic]*128, 8), topic)
                           for token in tokens)
     else:
         topic = 'null'
         topic_p = 0
         tokens = ' '.join('[<span>{}</span>]'.format(token) for token in tokens)
+    replies = ''
+    if child:
+        replies = document_html(child, main_topic_id, depth=depth-1)
+    elif depth > 0:
+        replies = ''.join([document_html(reply, main_topic_id, depth=depth-1)
+                           for reply in document.replies])
     return document_block_template.substitute({
-        'root': 'root' if document.is_root else '',
+        'root': 'root' if root else '',
         'main_topic': 'main-topic' if topic == main_topic_id else '',
         'topic': topic,
         'topic_p': topic_p,
         'author': document.author,
         'content': document.content,
         'tokens': tokens,
-        'replies': ''.join([document_html(reply, main_topic_id) for reply in document.replies])
+        'replies': replies
     })
 
 
@@ -209,9 +230,23 @@ for topic_id in range(num_topics):
         'topic_nav': topic_nav,
         'topic_words': topic_words(topic_id),
         'topic_stats': topic_stats(topic_id),
-        'sample_conversations': sample_conversations(topic_id)
+        'sample_conversations': sample_documents(topic_id) + sample_conversations(topic_id)
     })
     topic_filename = web_path + '/topic-' + str(topic_id) + '.html'
     with open(topic_filename, 'w') as f:
         f.write(html)
         print("Wrote {}.".format(topic_filename))
+
+
+def word_query():
+    while True:
+        word = input("word: ")
+        if not word in word2idx:
+            print(" invalid word!")
+            continue
+        probs = sorted(enumerate(word_weights[word2idx[word], :]), key=lambda x: -x[1])
+        for topic, prob in probs:
+            if prob >= 5e-3:
+                print(" Topic {0}: {1:.2f}%".format(topic, prob*100))
+
+word_query()

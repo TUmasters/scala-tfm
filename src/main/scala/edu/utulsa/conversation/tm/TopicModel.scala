@@ -42,7 +42,10 @@ abstract class TopicModel
     "num-topics" -> numTopics,
     "num-documents" -> corpus.size,
     "num-words" -> corpus.words.size,
-    "num-authors" -> corpus.authors.size
+    "num-authors" -> corpus.authors.size,
+    "score" -> score,
+    "bic" -> bic,
+    "aic" -> aic
   )
 
   def saveData(dir: File): Unit = {
@@ -65,7 +68,12 @@ abstract class TopicModel
 
   protected def saveModel(dir: File): Unit
 
-  def likelihood(corpus: Corpus): Double
+  def logLikelihood(corpus: Corpus): Double
 
-  lazy val score: Double = likelihood(corpus)
+  lazy val score: Double = logLikelihood(corpus)
+  lazy val bic: Double = {
+    val n = corpus.documents.map(document => document.words.size).sum
+    math.log(n) * numTopics + 2 * logLikelihood(corpus)
+  }
+  lazy val aic: Double = 2 * numTopics + 2 * logLikelihood(corpus)
 }
