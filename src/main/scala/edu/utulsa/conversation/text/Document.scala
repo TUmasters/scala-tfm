@@ -14,6 +14,7 @@ class Document
       .toSeq
   }
 
+  lazy val isRoot: Boolean = parentId == null
 //  var parent: Option[Document] = None
 //  var replies: Seq[Document] = Seq()
 

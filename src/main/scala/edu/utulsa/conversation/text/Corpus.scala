@@ -41,6 +41,13 @@ class Corpus private (
     Corpus(documents ++ c2.documents, words, authors)
   }
 
+  def expand(root: Document): Seq[Document] = {
+    if(replies contains root)
+      Seq(root) ++ replies(root).flatMap(expand)
+    else
+      Seq(root)
+  }
+
   /**
     * Auto-builds tree-structured conversations for any generic class wrapper around a document. Many of the inference
     * algorithms here need to be aware of tree-based methods, but it can be a bit of a mess. I move the complicated

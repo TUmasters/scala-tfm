@@ -73,12 +73,19 @@ object Driver extends App {
 
   println("Loading corpus...")
   val corpus = loadCorpus()
+
+  // val (testDocs, trainDocs) = corpus.roots.splitAt(500)
+  // val test = Corpus(testDocs.flatMap(corpus.expand), corpus.words, corpus.authors)
+  // val train = Corpus(trainDocs.flatMap(corpus.expand), corpus.words, corpus.authors)
+
+
   $(action) match {
     case "train" =>
       val tmAlgorithm: TMAlgorithm[_] = matchAlgorithm($(algorithm))
       println("Training...")
       val model: TopicModel = tmAlgorithm.train(corpus).asInstanceOf[TopicModel]
       println("Saving to file...")
+      // println(s"Left-out Likelihood: ${model.logLikelihood(test)}")
       save(model)
   }
 //  println("Loading corpus...")

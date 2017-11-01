@@ -135,8 +135,6 @@ sealed class NTFMOptimizer
     (1 to numIterations).foreach { (interval) =>
       eStep(interval)
       mStep(interval)
-      val ll: Double = NTFMInfer.logLikelihood(nodes)
-      println(f"Interval $interval (likelihood: $ll%8.2f)")
     }
     val d: Map[String, List[TPair]] = nodes.zipWithIndex.map { case (node, index) =>
       val maxItem = (!node.z).toArray.zipWithIndex
