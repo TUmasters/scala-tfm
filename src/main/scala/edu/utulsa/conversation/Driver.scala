@@ -78,12 +78,12 @@ object Driver extends App {
   }
 
   def evalDepth(tm: TMAlgorithm[_]): Unit = {
-    val (testDocs, trainDocs) = corpus.roots.splitAt(100)
-    val test = Corpus(testDocs.flatMap(corpus.expand(_)), corpus.words, corpus.authors)
-    val train = Corpus(trainDocs.flatMap(corpus.expand(_)), corpus.words, corpus.authors)
+    // val (testDocs, trainDocs) = corpus.roots.splitAt(100)
+    // val test = Corpus(testDocs.flatMap(corpus.expand(_)), corpus.words, corpus.authors)
+    // val train = Corpus(trainDocs.flatMap(corpus.expand(_)), corpus.words, corpus.authors)
 
-    for(depth <- 10 to 15) {
-      val depthDocs: Seq[Document] = train.roots.flatMap(train.expand(_, depth=depth))
+    for(depth <- 3 to 10) {
+      val depthDocs: Seq[Document] = corpus.roots.flatMap(corpus.expand(_, depth=depth))
       val depthCorpus: Corpus = Corpus(depthDocs, corpus.words, corpus.authors)
       val testSize: Int = corpus.size - depthCorpus.size
       println(s"""
@@ -93,15 +93,15 @@ object Driver extends App {
         | """.stripMargin)
       val model: TopicModel = tm.train(depthCorpus).asInstanceOf[TopicModel]
       val ll1 = model.score
-      val ll2 = model.logLikelihood(train)
-      val llTest = model.logLikelihood(test)
+      val ll2 = model.logLikelihood(corpus)
+      // val llTest = model.logLikelihood(test)
       val ll = ll2 - ll1
       val llAvg = ll / testSize
       println(s" ll1 = $ll1")
       println(s" ll2 = $ll2")
       println(s" log-likelihood = $ll")
       println(s" avg. log-likelihood = $llAvg")
-      println(s" test log-likelihood = $llTest")
+      // println(s" test log-likelihood = $llTest")
       model.save(new File($(outputDir) + s"/eval-depth/d$depth"))
     }
   }
