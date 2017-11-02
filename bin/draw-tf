@@ -175,7 +175,7 @@ def sample_documents(topic_id):
 
 def sample_conversations(topic_id):
     html = '<h1>conversations</h1><br /><div class="content">'
-    SAMPLE_SIZE = 20
+    SAMPLE_SIZE = 50
     documents_with_topic = set([d.id for d in corpus if d_topic[d.id] == topic_id])
     new_roots = [root for root in roots
                 if not set(root.flatten_ids()).isdisjoint(documents_with_topic)]

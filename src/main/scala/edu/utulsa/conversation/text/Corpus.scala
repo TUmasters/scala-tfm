@@ -41,11 +41,11 @@ class Corpus private (
     Corpus(documents ++ c2.documents, words, authors)
   }
 
-  def expand(root: Document): Seq[Document] = {
-    if(replies contains root)
-      Seq(root) ++ replies(root).flatMap(expand)
+  def expand(document: Document, depth: Int = Int.MaxValue): Seq[Document] = {
+    if(replies.contains(document) && depth > 0)
+      Seq(document) ++ replies(document).flatMap(expand(_, depth-1))
     else
-      Seq(root)
+      Seq(document)
   }
 
   /**

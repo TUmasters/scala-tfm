@@ -33,6 +33,10 @@ a = a - np.diag(np.diag(a))
 #     a[i, :] /= sum(a[i,:])
 #     print(sum(a[i, :]))
 
+topic_flows = [(topic, sum(a[:,topic])) for topic in range(a.shape[1])]
+for (topic, flow) in sorted(topic_flows, key=lambda x: -x[1]):
+    print("{} & {{\\tt {:.4f}}}\\\\".format(topic, flow))
+
 g = nx.from_numpy_matrix(a, create_using=nx.MultiDiGraph())
 
 ## Draw

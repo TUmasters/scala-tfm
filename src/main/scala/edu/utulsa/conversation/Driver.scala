@@ -4,7 +4,7 @@ import java.io.File
 
 import edu.utulsa.cli.{param, CLIParser, validators}
 import edu.utulsa.conversation.tm._
-import edu.utulsa.conversation.text.Corpus
+import edu.utulsa.conversation.text.{Document, Corpus}
 
 object Driver extends App {
   implicit val $: CLIParser = CLIParser.parse(args)
@@ -20,7 +20,7 @@ object Driver extends App {
     .validation(validators.IS_FILE)
     .register($)
 
-  private val actions: Seq[String] = Seq("train")
+  private val actions: Seq[String] = Seq("train", "eval-depth")
   private val action: param[String] = param("action")
     .description("Action to perform.")
     .validation(validators.IN(actions))
@@ -34,15 +34,15 @@ object Driver extends App {
     .validation(validators.IN(algorithms))
     .register($)
 
-  val evaluators: Seq[String] = Seq("cv", "dc", "train-test")
-  private val evaluator: param[String] = param("evaluator")
-    .description(s"""Method for evaluating model on the dataset.
-       |
-       | Choices: {${algorithms.mkString(", ")}}
-     """.stripMargin)
-    .validation(validators.IN(evaluators))
-    .default("cv")
-    .register($)
+  // val evaluators: Seq[String] = Seq("cv", "dc", "train-test")
+  // private val evaluator: param[String] = param("evaluator")
+  //   .description(s"""Method for evaluating model on the dataset.
+  //      |
+  //      | Choices: {${algorithms.mkString(", ")}}
+  //    """.stripMargin)
+  //   .validation(validators.IN(evaluators))
+  //   .default("cv")
+  //   .register($)
 
   private val outputDir: param[File] = param("output-dir")
     .description("Output directory. Default: output is placed in the directory of the input file.")
@@ -71,13 +71,42 @@ object Driver extends App {
     model.save($(outputDir))
   }
 
+  def evalTestTrain(): Unit = {
+    // val (testDocs, trainDocs) = corpus.roots.splitAt(500)
+    // val test = Corpus(testDocs.flatMap(corpus.expand), corpus.words, corpus.authors)
+    // val train = Corpus(trainDocs.flatMap(corpus.expand), corpus.words, corpus.authors)
+  }
+
+  def evalDepth(tm: TMAlgorithm[_]): Unit = {
+    val (testDocs, trainDocs) = corpus.roots.splitAt(100)
+    val test = Corpus(testDocs.flatMap(corpus.expand(_)), corpus.words, corpus.authors)
+    val train = Corpus(trainDocs.flatMap(corpus.expand(_)), corpus.words, corpus.authors)
+
+    for(depth <- 10 to 15) {
+      val depthDocs: Seq[Document] = train.roots.flatMap(train.expand(_, depth=depth))
+      val depthCorpus: Corpus = Corpus(depthDocs, corpus.words, corpus.authors)
+      val testSize: Int = corpus.size - depthCorpus.size
+      println(s"""
+        | DEPTH       $depth
+        | # training: ${depthCorpus.size}
+        | # testing:  $testSize
+        | """.stripMargin)
+      val model: TopicModel = tm.train(depthCorpus).asInstanceOf[TopicModel]
+      val ll1 = model.score
+      val ll2 = model.logLikelihood(train)
+      val llTest = model.logLikelihood(test)
+      val ll = ll2 - ll1
+      val llAvg = ll / testSize
+      println(s" ll1 = $ll1")
+      println(s" ll2 = $ll2")
+      println(s" log-likelihood = $ll")
+      println(s" avg. log-likelihood = $llAvg")
+      println(s" test log-likelihood = $llTest")
+      model.save(new File($(outputDir) + s"/eval-depth/d$depth"))
+    }
+  }
   println("Loading corpus...")
   val corpus = loadCorpus()
-
-  // val (testDocs, trainDocs) = corpus.roots.splitAt(500)
-  // val test = Corpus(testDocs.flatMap(corpus.expand), corpus.words, corpus.authors)
-  // val train = Corpus(trainDocs.flatMap(corpus.expand), corpus.words, corpus.authors)
-
 
   $(action) match {
     case "train" =>
@@ -87,35 +116,8 @@ object Driver extends App {
       println("Saving to file...")
       // println(s"Left-out Likelihood: ${model.logLikelihood(test)}")
       save(model)
+    case "eval-depth" =>
+      val tmAlgorithm: TMAlgorithm[_] = matchAlgorithm($(algorithm))
+      evalDepth(tmAlgorithm)
   }
-//  println("Loading corpus...")
-//  val corpus = loadCorpus()
-//  if ($(evaluator) == "default") {
-//    println("Training model...")
-//    val model = train(corpus)
-//    println("Saving model...")
-//    save(model)
-//    println(" Saved.")
-//    println("Done.")
-//  }
-//  else {
-//    val evaluator: Evaluator = $(evaluator) match {
-//      case _ if $(evaluator) == "cv" => new CrossValidation($(numFolds))
-//      case _ if $(evaluator) == "dc" => new DiscussionCompletion()
-//      case _ if $(evaluator) == "train-test" => new TrainTestSplit($(trainTestSplitP))
-//    }
-//    val alg: TMAlgorithm = $(algorithm) match {
-//      case _ if $(algorithm) == "lda" => null
-//      case _ if $(algorithm) == "ntfm" => new NTFMAlgorithm()
-//        .setNumTopics($(numTopics))
-//        .setNumIterations($(numIterations))
-//      case _ if $(algorithm) == "uatfm" => new UATFMAlgorithm()
-//        .setNumTopics($(numTopics))
-//        .setNumUserGroups($(numUserGroups))
-//        .setNumIterations($(numIterations))
-//        .setMaxEIterations($(maxEIterations))
-//      case _ if $(algorithm) == "mmtfm" => null
-//    }
-//    evaluator.run(corpus, alg)
-//  }
 }
