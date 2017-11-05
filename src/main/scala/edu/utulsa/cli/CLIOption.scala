@@ -1,19 +1,21 @@
 package edu.utulsa.cli
 
+import edu.utulsa.cli.validators.ValidationResult
+
 trait CLIOption
 
-case class param[T]
+case class Param[T]
 (
   name: String,
   description: Option[String] = None,
-  validate: T => Boolean = validators.NONE[T],
+  validate: T => ValidationResult = validators.NONE[T],
   default: Option[T] = None
 ) extends CLIOption {
-  def description(msg: String): param[T] = copy(description = Some(msg))
-  def validation(method: T => Boolean): param[T] = copy(validate = method)
-  def default(value: T): param[T] = copy(default = Some(value))
 
-  def register($: CLIParser)(implicit converter: ParamConverter[T]): this.type = {
+  def description(msg: String): Param[T] = copy(description = Some(msg))
+  def validation(method: T => ValidationResult): Param[T] = copy(validate = method)
+  def default(value: T): Param[T] = copy(default = Some(value))
+  def register(implicit $: CLIParser, converter: ParamConverter[T]): this.type = {
     $.register(this)
     this
   }
@@ -22,6 +24,21 @@ case class param[T]
   def optional: Boolean = default.isDefined
 }
 
+case class Command
+(
+  name: String,
+  description: Option[String],
+  actions: Map[String, Action] = Map()
+) extends CLIOption {
+
+  lazy val validate: String => ValidationResult = validators.IN(actions.keys.toSeq)
+  def description(content: String): Command = copy(description = Some(content))
+  def action(name: String)(action: Action): Command = copy(actions = actions + (name -> action))
+}
+
+trait Action {
+  def description: Option[String] = None
+}
 //case class command[String]
 //(
 //name: String,

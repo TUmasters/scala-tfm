@@ -3,6 +3,9 @@ package edu.utulsa
 import java.io.File
 
 package object cli {
+  case class IllegalCLIArgumentException(message: String, cause: Throwable = None.orNull)
+    extends Exception(message, cause)
+
   abstract class ParamConverter[T] {
     def decode(value: String): T
   }

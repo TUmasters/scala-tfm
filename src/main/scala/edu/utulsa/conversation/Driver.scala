@@ -2,14 +2,12 @@ package edu.utulsa.conversation
 
 import java.io.File
 
-import edu.utulsa.cli.{param, CLIParser, validators}
+import edu.utulsa.cli.{CLIApp, CLIParser, Param, validators}
 import edu.utulsa.conversation.tm._
-import edu.utulsa.conversation.text.{Document, Corpus}
+import edu.utulsa.conversation.text.{Corpus, Document}
 
-object Driver extends App {
-  implicit val $: CLIParser = CLIParser.parse(args)
-
-  private val corpusFile: param[File] = param("input-file")
+object Driver extends CLIApp {
+  private val corpusFile: Param[File] = Param("input-file")
     .description("""JSON-formatted file of documents. Must have the following structure:
       | [ ..., {
       |  "id": <document-id>,
@@ -18,36 +16,26 @@ object Driver extends App {
       |  "words": [<word-1>, <word-2>, ..., <word-n>]
       | }, ...]""".stripMargin)
     .validation(validators.IS_FILE)
-    .register($)
+    .register
 
   private val actions: Seq[String] = Seq("train", "eval-depth")
-  private val action: param[String] = param("action")
+  private val action: Param[String] = Param("action")
     .description("Action to perform.")
     .validation(validators.IN(actions))
-    .register($)
+    .register
 
   val algorithms: Seq[String] = Seq("lda", "ntfm", "uatfm", "mmtfm")
-  private val algorithm: param[String] = param("algorithm")
+  private val algorithm: Param[String] = Param("algorithm")
     .description(s"""Algorithm to use. Results are saved to a unique subdirectory.
        |
        | Choices: {${algorithms.mkString(", ")}}""".stripMargin)
     .validation(validators.IN(algorithms))
-    .register($)
+    .register
 
-  // val evaluators: Seq[String] = Seq("cv", "dc", "train-test")
-  // private val evaluator: param[String] = param("evaluator")
-  //   .description(s"""Method for evaluating model on the dataset.
-  //      |
-  //      | Choices: {${algorithms.mkString(", ")}}
-  //    """.stripMargin)
-  //   .validation(validators.IN(evaluators))
-  //   .default("cv")
-  //   .register($)
-
-  private val outputDir: param[File] = param("output-dir")
+  private val outputDir: Param[File] = Param("output-dir")
     .description("Output directory. Default: output is placed in the directory of the input file.")
     .default { new File($(corpusFile).getParent + "/" + $(algorithm) + "/") }
-    .register($)
+    .register
 
   def loadCorpus() = {
     Corpus.load($(corpusFile))

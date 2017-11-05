@@ -9,7 +9,7 @@ import org.json4s.native.Serialization
 import org.json4s.native.Serialization.write
 import java.io.PrintWriter
 
-import edu.utulsa.cli.{CLIParser, param}
+import edu.utulsa.cli.{CLIParser, Param}
 import edu.utulsa.conversation.text.{Corpus, Dictionary, Document, DocumentNode}
 import edu.utulsa.util._
 import edu.utulsa.util.Term
@@ -43,7 +43,7 @@ class NaiveTopicFlowModel
 }
 
 class NTFMAlgorithm(implicit $: CLIParser) extends TMAlgorithm[NaiveTopicFlowModel] {
-  val numIterations: param[Int] = param("num-iterations")
+  val numIterations: Param[Int] = Param("num-iterations")
     .description("""Number of iterations to run the NTFM for.""")
     .default(10)
     .register($)
