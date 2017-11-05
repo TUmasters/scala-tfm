@@ -1,0 +1,149 @@
+#!/usr/bin/env python3
+
+## CLI
+
+import os, sys, argparse
+
+parser = argparse.ArgumentParser(description='Parses a series of text documents into a better format.')
+parser.add_argument('data_file', type=str, metavar='D', help='file with documents.')
+args = parser.parse_args()
+
+## Load documents
+
+data_path = os.path.dirname(args.data_file)
+
+input_file = args.data_file
+output_file = data_path + "/documents.json"
+
+## Construct conversation tree
+
+from _document import parse_corpus, find_roots, prune
+import json
+
+with open(input_file, 'r') as f:
+    document_data = json.load(f)
+
+corpus = parse_corpus(document_data)
+roots = find_roots(corpus)
+
+invalid_content = ["[deleted]", "[removed]"]
+invalid_authors = ["AutoModerator", "DeltaBot", "[deleted]", "[removed]"]
+
+## Filter out comments that were deleted or authors lost
+to_prune = [d for d in corpus if d.content in invalid_content or d.author in invalid_authors]
+## Filter out short conversations
+to_prune += [r for r in roots if r.depth < 3 or r.size > 100]
+
+corpus = prune(corpus, to_prune)
+roots = find_roots(corpus)
+
+print("{} conversations, {} documents".format(len(roots), len(corpus)))
+
+from nltk.tokenize import sent_tokenize, word_tokenize
+from nltk.tag.stanford import StanfordPOSTagger
+
+pos_tagger = StanfordPOSTagger(model_filename='english-left3words-distsim.tagger')
+
+corpus_data = { document: {'tags': []} for document in corpus }
+
+def progress(msg):
+    sys.stdout.write("\r" + msg)
+    sys.stdout.flush()
+
+BATCH_TAG_SIZE = 10000
+print("POS tagging...")
+progress("{:7d} / {:<7d} documents tagged".format(0, len(corpus)))
+for b in range(0, len(corpus), BATCH_TAG_SIZE):
+    documents = corpus[b:b+BATCH_TAG_SIZE]
+    sents = []
+    sents_key = []
+    for document in documents:
+        doc_sents = [word_tokenize(sent) for sent in sent_tokenize(document.filtered_content)]
+        sents_key += [document] * len(doc_sents)
+        sents += doc_sents
+        corpus_data[document]['sents'] = doc_sents
+    tags = pos_tagger.tag_sents(sents)
+    for document, tag in zip(sents_key, tags):
+        corpus_data[document]['tags'] += [tag]
+    progress("{:7d} / {:<7d} documents tagged".format(b+len(documents), len(corpus)))
+print()
+
+
+from nltk.stem.porter import PorterStemmer
+from nltk.corpus import stopwords
+
+stemmer = PorterStemmer()
+en_stopwords = stopwords.words('english')
+valid_tags = set(['VBD', 'VBP', 'NNS', 'NN', 'RP', 'VBZ', 'NNP', 'RB', 'JJR',
+                  'VBN', 'VB', 'VBG', 'JJ', 'FW'])
+invalid_words = set(["'s", "'m", "n't", "'re", "(", ")", "[", "]", "’", "%", "''", "``", "“", "”"])
+
+def check_tags():
+    ## used to determine which tags to keep
+    tag_words = {}
+    for data in corpus_data.values():
+        for (word, tag) in [t for sent in data['tags'] for t in sent]:
+            if tag not in tag_words:
+                tag_words[tag] = []
+                tag_words[tag] += [word]
+
+    for tag, words in tag_words.items():
+        print("#" * 80)
+        print("'{}': {}".format(tag, words))
+
+
+print("Stemming and filtering stopwords...")
+for document in corpus:
+    data = corpus_data[document]
+    # print(document.filtered_content)
+    data['filtered'] = [[(stemmer.stem(word), tag) for (word, tag) in sent]
+                        for sent in data['tags']]
+    data['filtered'] = [[(word, tag) for (word, tag) in sent if not word in en_stopwords]
+                        for sent in data['filtered']]
+    data['filtered'] = [[word for (word, tag) in sent if tag in valid_tags and
+                                                         word not in invalid_words]
+                        for sent in data['filtered']]
+    data['filtered'] = [word for sent in data['filtered'] for word in sent]
+    # print(data['tags'])
+    # print(data['filtered'])
+
+
+import itertools
+
+# words = set(itertools.chain(*[data['filtered'] for data in corpus_data.values()]))
+
+print("Filtering out uncommon/common words...")
+word_count = {}
+for data in corpus_data.values():
+    for word in set(data['filtered']):
+        if not word in word_count:
+            word_count[word] = 0
+        word_count[word] += 1
+
+words = set(list(word_count.keys()))
+accept_words = set([word for word in words
+                    if word_count[word] >= 20
+                    and word_count[word] <= 0.2 * len(corpus)])
+
+
+for data in corpus_data.values():
+    data['tokens'] = [word for word in data['filtered'] if word in accept_words]
+
+
+results = []
+for document, data in corpus_data.items():
+    results.append({
+        'id': document.id,
+        'author': document.author,
+        'words': data['tokens'],
+        'parent': document.parent.id if document.parent else None
+    })
+
+print("{:8d} documents".format(len(results)))
+print("{:8d} words".format(len(accept_words)))
+
+print("Writing to file...")
+with open(output_file, 'w') as f:
+    f.write(json.dumps(results, indent=1))
+
+print("Done!")

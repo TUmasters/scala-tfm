@@ -1,0 +1,66 @@
+#!/usr/bin/env python3
+
+## CLI
+
+import os, sys, shutil, argparse
+import random, math
+
+parser = argparse.ArgumentParser(description='Creates an edgelist file to use with other graph visualization software.')
+parser.add_argument('data_path', type=str, metavar='D', help='data folder.')
+parser.add_argument('model', type=str, metavar='D', help='topic flow model.')
+parser.add_argument('--draw-net', action='store_true', help='includes a visualization of the network.')
+args = parser.parse_args()
+
+
+## Load documents
+
+import json
+import numpy as np
+
+data_path = args.data_path.rstrip('/')
+model_path = data_path + '/' + args.model
+
+params = json.load(open(model_path + '/params.json'))
+a = np.loadtxt(model_path + "/a.mat", delimiter=",")
+
+## Network
+
+import networkx as nx
+
+a = a - np.diag(np.diag(a))
+
+# for i in range(a.shape[0]):
+#     a[i, :] /= sum(a[i,:])
+#     print(sum(a[i, :]))
+
+topic_flows = [(topic, sum(a[:,topic])) for topic in range(a.shape[1])]
+for (topic, flow) in sorted(topic_flows, key=lambda x: -x[1]):
+    print("{} & {{\\tt {:.4f}}}\\\\".format(topic, flow))
+
+g = nx.from_numpy_matrix(a, create_using=nx.MultiDiGraph())
+
+## Draw
+
+if args.draw_net:
+    import matplotlib.pyplot as plt
+
+    pos = nx.fruchterman_reingold_layout(g)
+
+    ew = list(sorted([(u,v,d) for (u,v,d) in g.edges(data=True)], key=lambda e: -e[2]['weight']))
+
+    sl1 = int(0.2*len(ew))
+    sl2 = int(0.4*len(ew))
+    elarge = ew[:sl1]
+    emedium = ew[sl1:sl2]
+    esmall = ew[sl2:]
+
+    nx.draw_networkx_nodes(g, pos, node_size=500, label=range(len(g.nodes)))
+    nx.draw_networkx_edges(g, pos, edgelist=elarge, width=4, arrows=True)
+    nx.draw_networkx_edges(g, pos, edgelist=emedium, width=2, arrows=True,
+                           alpha=0.5, edge_color='b', style='dashed')
+    nx.draw_networkx_edges(g, pos, edgelist=esmall, width=1, arrows=True,
+                           alpha=0.1, edge_color='g', style='dashed')
+
+    plt.show()
+
+nx.write_gml(g, model_path + '/topic-net.gml')

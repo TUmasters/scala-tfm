@@ -4,15 +4,28 @@ import java.io.{File, PrintWriter}
 
 import breeze.linalg._
 import breeze.numerics.log
+import edu.utulsa.cli.{Param, CLIParser, validators}
 import edu.utulsa.conversation.text.{Corpus, Dictionary}
+
+import scala.collection.mutable
 
 case class TPair(p: Double, topic: Int)
 case class DocumentTopic(id: String, topics: List[TPair])
 
+abstract class TMAlgorithm[TM <: TopicModel](implicit val $: CLIParser) {
+  protected val numTopics: Param[Int] = Param("num-topics")
+    .description("The number of topics that the model will be trained on.")
+    .validation(validators.INT_GEQ(1))
+    .default(10)
+    .register($)
+
+  def train(corpus: Corpus): TM
+}
+
 abstract class TopicModel
 (
   val numTopics: Int,
-  val words: Dictionary,
+  val corpus: Corpus,
   val documentInfo: Map[String, List[TPair]],
   val wordInfo: Map[String, List[TPair]]
 ) {
@@ -27,7 +40,12 @@ abstract class TopicModel
 
   def params: Map[String, AnyVal] = Map(
     "num-topics" -> numTopics,
-    "num-words" -> words.size
+    "num-documents" -> corpus.size,
+    "num-words" -> corpus.words.size,
+    "num-authors" -> corpus.authors.size,
+    "score" -> score,
+    "bic" -> bic,
+    "aic" -> aic
   )
 
   def saveData(dir: File): Unit = {
@@ -50,5 +68,12 @@ abstract class TopicModel
 
   protected def saveModel(dir: File): Unit
 
-  def likelihood(corpus: Corpus): Double
+  def logLikelihood(corpus: Corpus): Double
+
+  lazy val score: Double = logLikelihood(corpus)
+  lazy val bic: Double = {
+    val n = corpus.documents.map(document => document.words.size).sum
+    math.log(n) * numTopics + 2 * logLikelihood(corpus)
+  }
+  lazy val aic: Double = 2 * numTopics + 2 * logLikelihood(corpus)
 }

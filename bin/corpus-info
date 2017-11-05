@@ -1,0 +1,22 @@
+#!/usr/bin/env python3
+
+import os, sys, argparse
+
+parser = argparse.ArgumentParser(description='Collects information from a corpus.')
+parser.add_argument('corpus_file', type=str, metavar='D', help='json-formatted corpus file. (documents.json)')
+args = parser.parse_args()
+
+import json
+
+corpus = json.load(open(args.corpus_file, 'r'))
+
+import itertools
+
+roots = [document for document in corpus if not document['parent']]
+words = set(itertools.chain(*[document['words'] for document in corpus]))
+
+print("""
+# documents:     {0}
+# words:         {1}
+# conversations: {2}
+""".format(len(corpus), len(words), len(roots)))

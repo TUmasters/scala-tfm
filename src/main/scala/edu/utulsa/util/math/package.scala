@@ -1,16 +1,15 @@
-package edu.utulsa.conversation.tm
+package edu.utulsa.util
 
 import java.io.{File, PrintWriter}
 
 import breeze.linalg._
-import breeze.numerics.{exp, log, log1p, pow}
+import breeze.numerics.{exp, log}
 
-import scala.util.Random
-import scala.util.control.Breaks._
-
-object MathUtils {
-
-  val rand = new Random()
+package object math {
+  def lse(x: Array[Double]): Double = {
+    val m = x.max
+    log(x.map(xi => exp(xi - m)).sum) + m
+  }
 
   /** Computes log(A * exp(b)). Very similar to the LogSumExp method, so I call it just that. **/
   def lse(A: DenseMatrix[Double], b: DenseVector[Double]): DenseVector[Double] = {
@@ -19,13 +18,13 @@ object MathUtils {
   }
 
   /** Standard LogSumExp method. **/
-  def lse(b: Vector[Double]) = {
+  def lse(b: Vector[Double]): Double = {
     val m = max(b)
     log(sum(exp(b :- m))) :+ m
   }
 
   /** LogSumExp applied to each dimension of a set of vectors. **/
-  def lse(vecs: Array[DenseVector[Double]]) = {
+  def lse(vecs: Array[DenseVector[Double]]): DenseVector[Double] = {
     // TODO: Simplify this crappy code!
     val size = vecs(0).length
     val m = DenseVector[Double](
@@ -70,5 +69,24 @@ object MathUtils {
     val buffer = io.Source.fromFile(file)
     val values: Seq[Double] = buffer.getLines.map(_.toDouble).toSeq
     DenseVector(values: _*)
+  }
+
+  /**
+    * Used from https://stackoverflow.com/a/24869852
+    * @param dist
+    * @tparam A
+    * @return
+    */
+  final def sample[A](dist: Map[A, Double]): A = {
+    val p = scala.util.Random.nextDouble
+    val it = dist.iterator
+    var accum = 0.0
+    while (it.hasNext) {
+      val (item, itemProb) = it.next
+      accum += itemProb
+      if (accum >= p)
+        return item  // return so that we don't have to search through the whole distribution
+    }
+    sys.error(f"this should never happen")  // needed so it will compile
   }
 }
