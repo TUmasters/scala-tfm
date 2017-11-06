@@ -1,33 +1,80 @@
 package edu.utulsa.cli
 
-import edu.utulsa.cli.validators.{ValidateError, ValidateSuccess}
 import scala.collection.mutable
 
-class CLIParser(val positional: List[String], val optional: Map[String, String]) {
-  private var i: Int = 0
-  private var s: mutable.Map[Param[_], Any] = mutable.Map()
-  def apply[T](param: Param[T]): T = {
-    if(s contains param)
-      s(param).asInstanceOf[T]
-    else param.default match {
-      case Some(value) => value
-      case _ => throw new IllegalArgumentException("Attempt to access CLI param without default argument.")
+//sealed abstract class Token
+//sealed case class PositionalToken(value: String)
+//sealed case class OptionalToken(key: String, value: String)
+
+class CLIParser private (val positional: Seq[String], val optional: Map[String, String]) {
+  private[cli] implicit val tree: ParamTree = new ParamTree
+  private[cli] var options: Map[CLIOption[_], _] = null
+
+  def apply[T](option: CLIOption[T]): T = {
+    if(options contains option)
+      options(option).asInstanceOf[T]
+    else option match {
+      case param: Param[T] =>
+        param.default match {
+          case Some(value) =>
+            value
+          case _ => throw new IllegalArgumentException(s"Required parameter '${param.name}' not found.")
+        }
+      case action: Action[_] =>
+        throw new IllegalArgumentException(s"Expected value for action '${action.name}'.")
     }
   }
 
-  def register[T](param: Param[T])(implicit converter: ParamConverter[T]): Unit = {
-    val value: T =
-      if(param.required) converter.decode(positional(i))
-      else converter.decode(optional(param.name))
+  def parse(): Unit = {
+    options = tree.parse(positional, optional)
+  }
 
-    param.validate(value) match {
-      case ValidateSuccess() =>
-        s(param) = value
-      case ValidateError(msg) =>
-        throw IllegalCLIArgumentException(s"Invalid argument supplied for argument ${param.name}:\n$msg")
+  def help(): Unit = ???
+  def usage(): Unit = ???
+}
+
+class ParamTree {
+  private[cli] val options: mutable.ListBuffer[CLIOption[_]] = mutable.ListBuffer()
+  private[cli] val converters: mutable.Map[CLIOption[_], ParamConverter[_]] = mutable.Map()
+  private[cli] val subtrees: mutable.Map[Action[_], Map[Command[_], ParamTree]] = mutable.Map()
+
+  private[cli] def register[T](option: CLIOption[T])(implicit converter: ParamConverter[T]): Unit = {
+    options += option
+    converters(option) = converter
+    option match {
+      case action: Action[_] =>
+        subtrees(action) = action.commands.map(c => c -> c.tree).toMap
+      case _ =>
     }
+  }
 
-    if(param.required) i += 1
+  private[cli] def parse(positional: Seq[String], optional: Map[String, String]): Map[CLIOption[_], _] = {
+    var posArgs: Seq[String] = positional
+    var optArgs: Map[String, String] = optional
+    options.flatMap {
+      case param: Param[_] =>
+        val converter = converters(param)
+        var value: Any = null
+        if(param.required) {
+          value = converter.decode(posArgs.head)
+          posArgs = posArgs.tail
+        }
+        else {
+          if(optional contains param.name)
+            value = converter.decode(optional(param.name))
+          optArgs = optArgs.filter { case (key, _) => key != param.name }
+        }
+        if(value != null) Seq(param -> value)
+        else Seq()
+      case action: Action[_] =>
+        val converter: ParamConverter[Command[_]] = converters(action).asInstanceOf[ParamConverter[Command[_]]]
+        val command: Command[_] = converter.decode(posArgs.head)
+        posArgs = posArgs.tail
+        val subtree = subtrees(action)(command)
+        val newOptions = subtree.parse(posArgs, optArgs)
+        optArgs = optArgs.filter { case (key, _) => newOptions.keys.map(_.name).toSeq.contains(key) }
+        Seq(action -> command) ++ newOptions
+    }.toMap
   }
 }
 
@@ -47,7 +94,7 @@ object CLIParser {
                    ): (List[String], Map[String, String]) = {
     rest match {
       case isHelp() :: tail =>
-        parse(tail, positional ::: List("help"), optional)
+        parse(tail, positional, optional)
       case isOptional(key) :: value :: tail =>
         parse(tail, positional, optional + (key -> value))
       case isOptionalEquals(key, value) :: tail =>

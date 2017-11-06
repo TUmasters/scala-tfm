@@ -12,14 +12,8 @@ import scala.collection.mutable
 case class TPair(p: Double, topic: Int)
 case class DocumentTopic(id: String, topics: List[TPair])
 
-abstract class TMAlgorithm[TM <: TopicModel](implicit val $: CLIParser) {
-  protected val numTopics: Param[Int] = Param("num-topics")
-    .description("The number of topics that the model will be trained on.")
-    .validation(validators.INT_GEQ(1))
-    .default(10)
-    .register($)
-
-  def train(corpus: Corpus): TM
+abstract class TMAlgorithm(val numTopics: Int) {
+  def train(corpus: Corpus): TopicModel
 }
 
 abstract class TopicModel

@@ -11,7 +11,12 @@ class DocumentNode[T <: DocumentNode[T]](val document: Document, val index: Int)
   def parent: Option[T] = theParent
   private[text] var theReplies: Seq[T] = _
   def replies: Seq[T] = theReplies
-
+  lazy val siblings: Seq[T] = parent match {
+    case Some(parent) =>
+      parent.replies.filter((reply) => reply != this)
+    case None =>
+      Seq()
+  }
   def isRoot: Boolean = parent match {
     case None => true
     case Some(_) => false
@@ -25,9 +30,6 @@ class Corpus private (
   val replies: Map[Document, Seq[Document]],
   val parent: Map[Document, Document]
 ) extends Iterable[Document] {
-//  lazy val roots: Seq[Document] = documents.filter(_.parent.isEmpty)
-//  lazy val replies: Seq[Document] = documents.filter(_.parent.isDefined)
-//  lazy val id2doc: Map[String, Document] = documents.map((d) => d.id -> d).toMap
   lazy val index: Map[Document, Int] = documents.zipWithIndex.toMap
 
   lazy val roots: Seq[Document] = documents.filter(_.parentId == null)

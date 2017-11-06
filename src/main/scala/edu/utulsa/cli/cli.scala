@@ -2,9 +2,21 @@ package edu.utulsa
 
 import java.io.File
 
+import edu.utulsa.cli.validators.ValidationResult
+
 package object cli {
   case class IllegalCLIArgumentException(message: String, cause: Throwable = None.orNull)
     extends Exception(message, cause)
+
+  trait ParamMap[T] {
+    def mapping: Map[String, T]
+    val validator: T => ValidationResult = validators.IN(mapping.values.toSeq)
+    implicit object ParamMapConverter extends ParamConverter[T] {
+      override def decode(value: String): T = {
+        mapping(value)
+      }
+    }
+  }
 
   abstract class ParamConverter[T] {
     def decode(value: String): T

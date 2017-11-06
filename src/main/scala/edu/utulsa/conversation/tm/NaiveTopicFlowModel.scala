@@ -42,14 +42,13 @@ class NaiveTopicFlowModel
   }
 }
 
-class NTFMAlgorithm(implicit $: CLIParser) extends TMAlgorithm[NaiveTopicFlowModel] {
-  val numIterations: Param[Int] = Param("num-iterations")
-    .description("""Number of iterations to run the NTFM for.""")
-    .default(10)
-    .register($)
-
+class NTFMAlgorithm
+(
+  override val numTopics: Int,
+  val numIterations: Int
+) extends TMAlgorithm(numTopics) {
   override def train(corpus: Corpus): NaiveTopicFlowModel =
-    new NTFMOptimizer(corpus, $(numTopics), $(numIterations))
+    new NTFMOptimizer(corpus, numTopics, numIterations)
       .train()
 }
 
@@ -201,13 +200,6 @@ object NTFMInfer {
   sealed class DNode(override val document: Document, override val index: Int)(implicit val params: NTFMParams)
     extends DocumentNode[DNode](document, index) {
     import params._
-
-    lazy val siblings: Seq[DNode] = {
-      parent match {
-        case None => Seq()
-        case Some(p) => p.replies.filter(child => child != this)
-      }
-    }
 
     /**
       * Computes log probabilities for observing a set of words for each latent
