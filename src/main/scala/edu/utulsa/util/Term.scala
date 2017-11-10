@@ -1,5 +1,7 @@
 package edu.utulsa.util
 
+import scala.collection.mutable
+
 class Term[T] private(update: => T) {
   var value: Option[T] = None
   def reset(): Unit = {
@@ -21,7 +23,14 @@ class Term[T] private(update: => T) {
 }
 
 object Term {
-  def apply[T](update: => T): Term[T] = {
-    new Term(update)
+  def apply[T](update: => T)(implicit terms: mutable.ListBuffer[Term[_]]): Term[T] = {
+    val term = new Term(update)
+    terms += term
+    term
   }
+}
+
+trait TermContainer {
+  implicit protected val terms: mutable.ListBuffer[Term[_]] = mutable.ListBuffer()
+  def reset(): Unit = terms.foreach(_.reset())
 }

@@ -6,7 +6,7 @@ import breeze.linalg._
 import breeze.numerics.{exp, log}
 
 package object math {
-  def lse(x: Array[Double]): Double = {
+  def lse(x: Iterable[Double]): Double = {
     val m = x.max
     log(x.map(xi => exp(xi - m)).sum) + m
   }
@@ -78,7 +78,7 @@ package object math {
     * @return
     */
   final def sample[A](dist: Map[A, Double]): A = {
-    val p = scala.util.Random.nextDouble
+    val p = scala.util.Random.nextDouble * dist.values.sum
     val it = dist.iterator
     var accum = 0.0
     while (it.hasNext) {

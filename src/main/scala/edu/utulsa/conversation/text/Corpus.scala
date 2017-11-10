@@ -17,6 +17,11 @@ class DocumentNode[T <: DocumentNode[T]](val document: Document, val index: Int)
     case None =>
       Seq()
   }
+  lazy val depth: Int = {
+    if(replies.size <= 0) 1
+    else 1 + replies.map(_.depth).max
+  }
+  lazy val size: Int = 1 + replies.map(_.size).fold(0)(_ + _)
   def isRoot: Boolean = parent match {
     case None => true
     case Some(_) => false

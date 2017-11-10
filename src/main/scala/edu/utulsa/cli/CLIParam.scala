@@ -4,7 +4,7 @@ import edu.utulsa.cli.validators.ValidationResult
 
 import scala.collection.mutable
 
-trait CLIOption[T] {
+trait CLIParam[T] {
   def name: String
   def help: Option[String]
   def validate: T => ValidationResult
@@ -22,7 +22,7 @@ case class Param[T]
   help: Option[String] = None,
   validate: T => ValidationResult = validators.NONE[T],
   defaultFunc: Option[() => T] = None
-) extends CLIOption[T] {
+) extends CLIParam[T] {
   def help(msg: String): Param[T] = copy(help = Some(msg))
   def validation(method: T => ValidationResult): Param[T] = copy(validate = method)
   //def default(value: () => T): Param[T] = copy(defaultFunc = Some(value))
@@ -38,7 +38,7 @@ case class Param[T]
 
 
 trait Command[T] {
-  implicit val tree = new ParamTree
+  implicit val tree: ParamTree = new ParamTree
   def name: String
   def help: String = null
   def exec(): T
@@ -50,7 +50,7 @@ case class Action[T]
   name: String,
   help: Option[String] = None,
   commands: Seq[Command[T]] = Seq()
-) extends CLIOption[Command[T]] {
+) extends CLIParam[Command[T]] {
   lazy val actionMap: ParamMap[Command[T]] = new ParamMap[Command[T]] {
     lazy val mapping: Map[String, Command[T]] = commands.map(a => a.name -> a).toMap
   }

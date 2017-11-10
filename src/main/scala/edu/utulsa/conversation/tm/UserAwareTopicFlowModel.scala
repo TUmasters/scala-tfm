@@ -1,35 +1,12 @@
 package edu.utulsa.conversation.tm
 
 import breeze.linalg._
-import breeze.numerics.{exp, log, log1p, pow}
+import breeze.numerics.{exp, log}
 import java.io.File
 
-import org.json4s._
-import org.json4s.native.JsonMethods._
-import org.json4s.native.Serialization
-import org.json4s.native.Serialization.write
-import java.io.PrintWriter
-
 import edu.utulsa.conversation.text.{Corpus, Dictionary, Document, DocumentNode}
-import edu.utulsa.util.Term
+import edu.utulsa.util.{Term, TermContainer}
 import edu.utulsa.util.math._
-
-trait UATFMParams {
-  implicit val modelParams: this.type = this
-  val M: Int
-  val K: Int
-  val G: Int
-  val pi: Array[DenseVector[Double]]
-  val logPi: Term[Array[DenseVector[Double]]] = Term {
-    pi.map(log(_))
-  }
-  val a: Array[DenseMatrix[Double]]
-  val theta: DenseMatrix[Double]
-  val logTheta: Term[DenseMatrix[Double]] = Term {
-    log(theta)
-  }
-  val r: DenseMatrix[Double]
-}
 
 class UserAwareTopicFlowModel
 (
@@ -59,7 +36,31 @@ class UserAwareTopicFlowModel
     }
   }
 
-  override def logLikelihood(corpus: Corpus) = ???
+  override def logLikelihood(corpus: Corpus): Double = {
+    val (trees, dnodes, unodes) = UATFMInfer.build(corpus)
+    UATFMInfer.update(trees, dnodes, unodes, numUserGroups, 10)
+    UATFMInfer.approxLikelihood(trees)
+  }
+}
+
+trait UATFMParams extends TermContainer {
+  implicit val modelParams: this.type = this
+  val M: Int
+  val K: Int
+  val G: Int
+  val pi: Array[DenseVector[Double]]
+  val logPi: Term[Array[DenseVector[Double]]] = Term {
+    pi.map(log(_))
+  }
+  val a: Array[DenseMatrix[Double]]
+  val logA: Term[Array[DenseMatrix[Double]]] = Term {
+    a.map(log(_))
+  }
+  val theta: DenseMatrix[Double]
+  val logTheta: Term[DenseMatrix[Double]] = Term {
+    log(theta)
+  }
+  val r: DenseMatrix[Double]
 }
 
 class UATFMAlgorithm
@@ -89,6 +90,15 @@ object UserAwareTopicFlowModel {
   }
 }
 
+
+/**
+  * UATFMOptimizer: Trains the parameters for a UATFM model on some corpus.
+  * @param corpus The corpus to train on.
+  * @param numTopics Number of topics to use.
+  * @param numUserGroups Number of user groups to use.
+  * @param numIterations Number of iterations to run for.
+  * @param maxEIterations Maximum number of iterations to run for.
+  */
 class UATFMOptimizer
 (
   val corpus: Corpus,
@@ -98,18 +108,14 @@ class UATFMOptimizer
   val maxEIterations: Int
 ) extends UATFMParams {
 
-  import edu.utulsa.util.math._
-
   def train(): UserAwareTopicFlowModel = {
-//    println("Initializing...")
     (1 to numIterations).foreach { (interval) =>
-      print(s" (t $interval)")
-//      println("  - E step")
       eStep(interval)
-//      println("  - M step")
       mStep(interval)
+      println(UATFMInfer.approxLikelihood(trees))
+      print(" approx ")
+      println(UATFMInfer.fastApproxLikelihood(trees))
     }
-    println()
     val d: Map[String, List[TPair]] = dnodes.map((node) =>
       node.document.id ->
         (!node.z).data.zipWithIndex.map { case (p, i) => TPair(p, i) }.sortBy(-_.p).toList
@@ -129,29 +135,17 @@ class UATFMOptimizer
 
   val (trees, dnodes, unodes) = UATFMInfer.build(corpus)
 
-  class UATFMParams
-  (
-    val pi: Array[DenseVector[Double]],
-    val a: Array[DenseMatrix[Double]],
-    val theta: DenseMatrix[Double]
-  ) {
-    /** Track these values just in case we need them **/
-    lazy val logPi: Array[DenseVector[Double]] = pi.map(pig => log(pig))
-    lazy val logA: Array[DenseMatrix[Double]] = a.map(ag => log(ag))
-    lazy val logTheta: DenseMatrix[Double] = log(theta)
-  }
-
   val roots: Seq[Int] = trees.map(_.root.index)
 
   /** MODEL PARAMETERS **/
-  val pi: Array[DenseVector[Double]]    = (1 to G).map((i) => normalize(DenseVector.rand(K))).toArray // k x g
-  val a: Array[DenseMatrix[Double]]     = (1 to G).map((i) => normalize(DenseMatrix.rand(K, K), Axis._1, 1.0)).toArray // g x k x k
+  val pi: Array[DenseVector[Double]]    = (1 to G).map(_ => normalize(DenseVector.rand(K))).toArray // k x g
+  val a: Array[DenseMatrix[Double]]     = (1 to G).map(_ => normalize(DenseMatrix.rand(K, K), Axis._1, 1.0)).toArray // g x k x k
   val theta: DenseMatrix[Double]        = normalize(DenseMatrix.rand(M, K), Axis._0, 1.0) // m x k
 
   /** LATENT VARIABLE ESTIMATES **/
   val q: DenseMatrix[Double]     = normalize(DenseMatrix.rand[Double](K, N), Axis._1, 1.0) // k x n
   val r: DenseMatrix[Double]     = normalize(DenseMatrix.rand[Double](G, U), Axis._1, 1.0) // g x u
-  val qr: Array[DenseMatrix[Double]] = (1 to G).map((i) => DenseMatrix.zeros[Double](K, N)).toArray // g x k x n
+  val qr: Array[DenseMatrix[Double]] = (1 to G).map(_ => DenseMatrix.zeros[Double](K, N)).toArray // g x k x n
 
   /** USEFUL INTERMEDIATES **/
   val responses: DenseVector[Double] = {
@@ -188,7 +182,27 @@ class UATFMOptimizer
   }   // n x m
 
   protected def eStep(interval: Int): Unit = {
-    UATFMInfer.eStep(trees, dnodes, unodes, G, q, r, qr)
+    UATFMInfer.update(trees, dnodes, unodes, G, maxEIterations)
+
+    if(q != null)
+      trees.par.foreach  { tree =>
+        tree.nodes.foreach { node =>
+          q(::, node.index) := !node.z
+        }
+      }
+    if(r != null)
+      unodes.par.foreach { node =>
+        r(::, node.user) := !node.r
+      }
+    if(qr != null && q != null && r != null)
+      (0 until G).foreach { (g) =>
+        qr(g) := q
+        unodes.foreach { (unode) =>
+          unode.documents.foreach { (dnode) =>
+            qr(g)(::, dnode.index) :*= (!unode.r)(g)
+          }
+        }
+      }
   }
 
   protected def mStep(interval: Int): Unit = {
@@ -211,7 +225,7 @@ class UATFMOptimizer
       }
     ).par.foreach { case (step) => step() }
 
-    // println(s"   ~likelihood: ${inference.logLikelihood()}")
+    reset()
   }
 }
 
@@ -234,10 +248,31 @@ object UATFMInfer {
     (trees, dnodes, unodes)
   }
 
+  def fastApproxLikelihood(trees: Seq[DTree]): Double = {
+    trees.map(tree => tree.nodes.map(n => lse((!n.probW) :+ log(!n.z))).sum).sum
+  }
+
+  def approxLikelihood(trees: Seq[DTree]): Double = {
+    val lls = trees.map(tree => {
+      val samples: Seq[Double] = (1 to 20).map(i => {
+        // compute likelihood on this sample
+        val topics: Map[DNode, Int] = tree.nodes.map(node => node -> sample(!node.topicProbs)).toMap
+        val groups: Map[UNode, Int] = tree.users.map(user => user -> sample(!user.groupProbs)).toMap
+        val logPZ = tree.nodes.map(node => (!node.probW)(topics(node))).sum
+        val logZ = tree.p(topics, groups)
+        val logQ = tree.nodes.map(node => log((!node.z)(topics(node)))).sum +
+          tree.users.map(user => log((!user.r)(groups(user)))).sum
+        logPZ + logZ - logQ
+      })
+      lse(samples) - samples.size
+    })
+    lls.sum
+  }
+
   ////////////////////////////////////////////////////////////////
   // USER NODE
   ////////////////////////////////////////////////////////////////
-  sealed class UNode(val user: Int, val documents: Seq[DNode])(implicit val params: UATFMParams) {
+  sealed class UNode(val user: Int, val documents: Seq[DNode])(implicit val params: UATFMParams) extends TermContainer {
 
     import params._
     import edu.utulsa.util.math._
@@ -245,7 +280,7 @@ object UATFMInfer {
     var dist: Double = G
 
     val r: Term[DenseVector[Double]] = Term {
-      val oldR = (!r).copy
+//      val oldR = (!r).copy
       val n: DenseVector[Double] = documents.map { case (node) =>
         node.parent match {
           case None =>
@@ -260,12 +295,12 @@ object UATFMInfer {
       }.reduce(_ + _)
       // Normalize
       val newR = exp(n :- lse(n))
-      dist = norm(oldR - newR)
+//      dist = norm(oldR - newR)
       newR
     }.initialize { DenseVector.rand[Double](G) }
 
-    def reset(): Unit = {
-      r.reset()
+    val groupProbs: Term[Map[Int, Double]] = Term {
+      (!r).toArray.zipWithIndex.map(t => (t._2, t._1)).toMap
     }
   }
 
@@ -274,7 +309,7 @@ object UATFMInfer {
   // DOCUMENT NODE
   ////////////////////////////////////////////////////////////////
   sealed class DNode(override val document: Document, override val index: Int)(implicit val params: UATFMParams)
-    extends DocumentNode[DNode](document, index) {
+    extends DocumentNode[DNode](document, index) with TermContainer {
 
     import params._
     import edu.utulsa.util.math._
@@ -332,29 +367,38 @@ object UATFMInfer {
     var dist: Double = K
 
     val z: Term[DenseVector[Double]] = Term {
-      val oldZ = (!z).copy
+//      val oldZ = (!z).copy
       val tmp = !lambda :+ !tau
       val newZ = exp(tmp :- lse(tmp))
-      dist = norm(oldZ - newZ)
+//      dist = norm(oldZ - newZ)
       newZ
     }.initialize { DenseVector.rand[Double](K) }
 
-    val loglikelihood: Term[Double] = Term {
+    val topicProbs: Term[Map[Int, Double]] = Term {
+      (!z).toArray.zipWithIndex.map(t => (t._2, t._1)).toMap
+    }
+
+    val logLikelihood: Term[Double] = Term {
       parent match {
         case None =>
-          lse(pi.zipWithIndex.map { case (pi, g) => lse(!probW :+ log(pi * (!author.r)(g))) })
+          lse(pi.zipWithIndex.map { case (piG, g) => lse(!probW :+ log(piG * (!author.r)(g))) })
         case Some(parent) =>
-          lse(a.zipWithIndex.map { case (a, g) => lse(!probW :+ log(a.t * !parent.z * (!author.r)(g)))})
+          lse(a.zipWithIndex.map { case (aG, g) => lse(!probW :+ log(aG.t * !parent.z * (!author.r)(g)))})
       }
     }
 
-    def reset(): Unit = {
-      probW.reset()
-      lambdaMsg.reset()
-      lambda.reset()
-      tau.reset()
-      z.reset()
-      loglikelihood.reset()
+    def logP(topics: Map[DNode, Int], groups: Map[UNode, Int]): Double = {
+      val z = topics(this)
+      val y = groups(author)
+      val term1: Double = parent match {
+        case Some(p) =>
+          val zp: Int = topics(p)
+          (!logA)(y)(zp, z)
+        case None =>
+          (!logPi)(y)(z)
+      }
+      val term2: Double = replies.foldLeft(0d)((p, reply) => p + reply.logP(topics, groups))
+      term1 + term2
     }
   }
 
@@ -367,49 +411,31 @@ object UATFMInfer {
     }
 
     lazy val nodes: Seq[DNode] = expand(root)
+    lazy val users: Seq[UNode] = nodes.map(_.author).distinct
 
-    def reset(): Unit = {
-      nodes.foreach { (node) => node.reset() }
+    def reset(): Unit = nodes.foreach { (node) => node.reset() }
+
+    def loglikelihood: Double = nodes.map(!_.logLikelihood).sum
+
+    def p(topics: Map[DNode, Int], groups: Map[UNode, Int]) = {
+      root.logP(topics, groups)
     }
-
-    def loglikelihood: Double = nodes.map(!_.loglikelihood).sum
   }
 
-  def eStep(trees: Seq[DTree], dnodes: Seq[DNode], unodes: Seq[UNode], G: Int,
-            q: DenseMatrix[Double] = null, r: DenseMatrix[Double] = null, qr: Array[DenseMatrix[Double]] = null
-           ): Unit = {
+  def update(trees: Seq[DTree], dnodes: Seq[DNode], unodes: Seq[UNode], G: Int, numIterations: Int): Unit = {
     import scala.util.control.Breaks._
     val roots = dnodes.filter(_.isRoot)
     breakable {
-      for(i <- 1 to 10) {
+      for(_ <- 1 to 10) {
         unodes.par.foreach(author => { author.reset(); author.r.forceUpdate() })
         roots.par.foreach(document => { document.reset(); document.z.forceUpdate() })
-        val derror = dnodes.map((dnode) => dnode.dist).sum / dnodes.size
-        val dncert = sum(dnodes.map((dnode) => if(any(!dnode.z :> 0.5)) 1 else 0))
-        val uerror = unodes.map((unode) => unode.dist).sum / unodes.size
-        val uncert = sum(unodes.map((unode) => if(any(!unode.r :> 0.5)) 1 else 0))
-        if(derror <= 1e-3 && uerror <= 1e-3)
+        val docError: Double = dnodes.map((dnode) => dnode.dist).sum / dnodes.size
+        val userError: Double = unodes.map((unode) => unode.dist).sum / unodes.size
+//        val docUncert: Double = sum(dnodes.map((dnode) => if(any(!dnode.z :> 0.5)) 1 else 0))
+//        val userUncert: Double = sum(unodes.map((unode) => if(any(!unode.r :> 0.5)) 1 else 0))
+        if(docError <= 1e-3 && userError <= 1e-3)
           break
       }
     }
-    if(q != null)
-      trees.par.foreach  { tree =>
-        tree.nodes.foreach { node =>
-          q(::, node.index) := !node.z
-        }
-      }
-    if(r != null)
-      unodes.par.foreach { node =>
-        r(::, node.user) := !node.r
-      }
-    if(qr != null && q != null && r != null)
-      (0 until G).foreach { (g) =>
-        qr(g) := q
-        unodes.foreach { (unode) =>
-          unode.documents.foreach { (dnode) =>
-            qr(g)(::, dnode.index) :*= (!unode.r)(g)
-          }
-        }
-      }
   }
 }

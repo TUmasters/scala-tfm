@@ -8,9 +8,9 @@ import scala.collection.mutable
 
 class CLIParser private (val positional: Seq[String], val optional: Map[String, String]) {
   private[cli] implicit val tree: ParamTree = new ParamTree
-  private[cli] var options: Map[CLIOption[_], _] = null
+  private[cli] var options: Map[CLIParam[_], _] = null
 
-  def apply[T](option: CLIOption[T]): T = {
+  def apply[T](option: CLIParam[T]): T = {
     if(options contains option)
       options(option).asInstanceOf[T]
     else option match {
@@ -34,11 +34,11 @@ class CLIParser private (val positional: Seq[String], val optional: Map[String, 
 }
 
 class ParamTree {
-  private[cli] val options: mutable.ListBuffer[CLIOption[_]] = mutable.ListBuffer()
-  private[cli] val converters: mutable.Map[CLIOption[_], ParamConverter[_]] = mutable.Map()
+  private[cli] val options: mutable.ListBuffer[CLIParam[_]] = mutable.ListBuffer()
+  private[cli] val converters: mutable.Map[CLIParam[_], ParamConverter[_]] = mutable.Map()
   private[cli] val subtrees: mutable.Map[Action[_], Map[Command[_], ParamTree]] = mutable.Map()
 
-  private[cli] def register[T](option: CLIOption[T])(implicit converter: ParamConverter[T]): Unit = {
+  private[cli] def register[T](option: CLIParam[T])(implicit converter: ParamConverter[T]): Unit = {
     options += option
     converters(option) = converter
     option match {
@@ -48,7 +48,7 @@ class ParamTree {
     }
   }
 
-  private[cli] def parse(positional: Seq[String], optional: Map[String, String]): Map[CLIOption[_], _] = {
+  private[cli] def parse(positional: Seq[String], optional: Map[String, String]): Map[CLIParam[_], _] = {
     var posArgs: Seq[String] = positional
     var optArgs: Map[String, String] = optional
     options.flatMap {

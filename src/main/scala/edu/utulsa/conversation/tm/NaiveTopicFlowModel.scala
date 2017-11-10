@@ -36,9 +36,9 @@ class NaiveTopicFlowModel
   }
 
   override def logLikelihood(corpus: Corpus): Double = {
-    val (_, nodes) = NTFMInfer.build(corpus)
-    nodes.foreach(node => node.reset())
-    NTFMInfer.logLikelihood(nodes)
+    val (trees, _) = NTFMInfer.build(corpus)
+    trees.foreach(tree => tree.nodes.foreach(_.reset()))
+    NTFMInfer.approxLikelihood(trees)
   }
 }
 
@@ -66,7 +66,7 @@ object NaiveTopicFlowModel {
 }
 
 
-sealed trait NTFMParams {
+sealed trait NTFMParams extends TermContainer {
   implicit val modelParams: this.type = this
   val M: Int
   val K: Int
@@ -134,6 +134,7 @@ sealed class NTFMOptimizer
     (1 to numIterations).foreach { (interval) =>
       eStep(interval)
       mStep(interval)
+      println(f"${NTFMInfer.fastApproxLikelihood(nodes)}%12.4f ~ ${NTFMInfer.approxLikelihood(trees)}%12.4f")
     }
     val d: Map[String, List[TPair]] = nodes.zipWithIndex.map { case (node, index) =>
       val maxItem = (!node.z).toArray.zipWithIndex
@@ -156,6 +157,11 @@ sealed class NTFMOptimizer
     trees.par.foreach { case (tree) =>
       tree.nodes.foreach { node => node.reset() }
       tree.nodes.foreach { node => q(::, node.index) := !node.z }
+//      if(tree.root.depth == tree.root.size) {
+//        val ll1: Double = tree.loglikelihood
+//        val ll2: Double = (!tree.leaves.head.alpha).toArray.sum
+//        println(f"${tree.root.depth} $ll1%.4f $ll2%.4f")
+//      }
     }
   }
 
@@ -176,9 +182,7 @@ sealed class NTFMOptimizer
       }
     ).par.foreach { case (step) => step() }
 
-    logTheta.reset()
-    logPi.reset()
-    logA.reset()
+    reset()
   }
 }
 
@@ -191,14 +195,33 @@ object NTFMInfer {
     (trees, nodes)
   }
 
-  def logLikelihood(nodes: Seq[DNode]): Double =
+  def fastApproxLikelihood(nodes: Seq[DNode]): Double = {
     nodes.par.map((node) => node.logLikelihood.get).sum
+  }
+
+  def approxLikelihood(trees: Seq[DTree]): Double = {
+    val lls = trees.map(tree => {
+      val samples: Seq[Double] = (1 to 20).map(i => {
+        // compute likelihood on this sample
+        val topics: Map[DNode, Int] = tree.nodes.map(node => node -> sample(!node.topicProbs)).toMap
+        val logPZ = tree.nodes.map(node => (!node.probW)(topics(node))).sum
+        val logZ = tree.logP(topics)
+        val logQ = tree.nodes.map(node => log((!node.z)(topics(node)))).sum
+        if(logPZ.isInfinite || logZ.isInfinite || logQ.isInfinite ) {
+          println(s" error $logPZ $logZ $logQ")
+        }
+        logPZ + logZ - logQ
+      })
+      lse(samples) - samples.size
+    })
+    lls.sum
+  }
 
   /**
     * Inference on documents.
     */
   sealed class DNode(override val document: Document, override val index: Int)(implicit val params: NTFMParams)
-    extends DocumentNode[DNode](document, index) {
+    extends DocumentNode[DNode](document, index) with TermContainer {
     import params._
 
     /**
@@ -255,18 +278,30 @@ object NTFMInfer {
     }
       .initialize { normalize(DenseVector.rand[Double](K), 1.0) }
 
+    val topicProbs: Term[Map[Int, Double]] = Term {
+      (!z).toArray.zipWithIndex.map(t => t._2 -> t._1).toMap
+    }
+
     val logLikelihood: Term[Double] = Term {
       lse(!probW :+ !z)
     }
 
-    def reset(): Unit = {
-      probW.reset()
-      lambda.reset()
-      lambdaMsg.reset()
-      tau.reset()
-      qi.reset()
-      z.reset()
-      logLikelihood.reset()
+    val alpha1: Term[DenseVector[Double]] = Term {
+      parent match {
+        case Some(p) => lse(a.t, !p.alpha)
+        case None => pi
+      }
+    }
+
+    val alpha: Term[DenseVector[Double]] = Term {
+      !probW :+ !alpha1
+    }
+
+    def logP(topics: Map[DNode, Int]): Double = {
+      parent match {
+        case Some(p) => (!logA)(topics(p), topics(this))
+        case None => (!logPi)(topics(this))
+      }
     }
   }
 
@@ -279,8 +314,11 @@ object NTFMInfer {
     }
 
     lazy val nodes: Seq[DNode] = expand(root)
+    lazy val leaves: Seq[DNode] = nodes.filter(_.replies.size <= 0)
 
     def loglikelihood: Double =
       nodes.map(_.logLikelihood.get).sum
+
+    def logP(topics: Map[DNode, Int]): Double = nodes.map(_.logP(topics)).sum
   }
 }
