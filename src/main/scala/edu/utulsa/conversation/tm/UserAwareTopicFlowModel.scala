@@ -224,7 +224,7 @@ class UATFMOptimizer
       () => {
         // A maximization
         a.zipWithIndex.foreach { case (a_g, g) =>
-          a_g := normalize((q * b * qr(g).t) :+ (1e-3/(K*K)), Axis._1, 1.0)
+          a_g := normalize(q * b * qr(g).t :+ (1e-3/(K*K)), Axis._1, 1.0)
         }
       },
       () => {
@@ -288,11 +288,12 @@ object UATFMInfer {
 
     val r: Term[DenseVector[Double]] = Term {
       //      val oldR = (!r).copy
-      val n: DenseVector[Double] = (!logPhi).copy
+      val n: DenseVector[Double] = DenseVector.zeros[Double](G)
       if(documents.length <= 2 || G <= 1) {
         n(0) = 1d
       }
       else {
+        n(1 until G) := !logPhi
         n(1 until G) :+= documents.map { case (node) =>
           node.parent match {
             case None =>
@@ -305,15 +306,22 @@ object UATFMInfer {
               ).toArray)
           }
         }.reduce(_ + _)
+        n(1 until G) := exp(n(1 until G) :- lse(n(1 until G)))
+        if(n(0) > 0)
+          println(n)
       }
-      // Normalize
-      val newR = exp(n :- lse(n))
-      //      dist = norm(oldR - newR)
-      newR
-    }.initialize { DenseVector.rand[Double](G) }
+      n
+    }.initialize {
+      val n = DenseVector.zeros[Double](G)
+      if(documents.length <= 2 || G <= 1)
+        n(0) = 1d
+      else
+        n(1 until G) := normalize(DenseVector.rand[Double](G-1), 1.0)
+      n
+    }
 
     def logP(topics: Map[DNode, Int], groups: Map[UNode, Int]): Double = {
-      if(documents.length <= 2)
+      if(documents.length <= 2 || G <= 1)
         1d
       else
         (!logPhi) (groups(this)-1)
