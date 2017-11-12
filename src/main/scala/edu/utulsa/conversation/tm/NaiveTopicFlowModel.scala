@@ -131,10 +131,12 @@ sealed class NTFMOptimizer
   }   // n x m
 
   def train(): NaiveTopicFlowModel = {
+    println(f"init   ${NTFMInfer.fastApproxLikelihood(nodes)}%12.4f ~ ${NTFMInfer.approxLikelihood(trees)}%12.4f")
     (1 to numIterations).foreach { (interval) =>
       eStep(interval)
+      println(f"e-step ${NTFMInfer.fastApproxLikelihood(nodes)}%12.4f ~ ${NTFMInfer.approxLikelihood(trees)}%12.4f")
       mStep(interval)
-      println(f"${NTFMInfer.fastApproxLikelihood(nodes)}%12.4f ~ ${NTFMInfer.approxLikelihood(trees)}%12.4f")
+      println(f"m-step ${NTFMInfer.fastApproxLikelihood(nodes)}%12.4f ~ ${NTFMInfer.approxLikelihood(trees)}%12.4f")
     }
     val d: Map[String, List[TPair]] = nodes.zipWithIndex.map { case (node, index) =>
       val maxItem = (!node.z).toArray.zipWithIndex
@@ -174,11 +176,11 @@ sealed class NTFMOptimizer
       },
       () => {
         // A maximization
-        a := normalize((q * b * q.t) :+ (1e-3 / K), Axis._1, 1.0)
+        a := normalize((q * b * q.t) :+ (1e-3 / (K*K)), Axis._1, 1.0)
       },
       () => {
         // Theta maximization
-        theta := normalize((q * c) :+ (1e-7 / K), Axis._1, 1.0).t
+        theta := normalize((q * c) :+ (1e-3 / (K*M)), Axis._1, 1.0).t
       }
     ).par.foreach { case (step) => step() }
 
@@ -212,7 +214,7 @@ object NTFMInfer {
         }
         logPZ + logZ - logQ
       })
-      lse(samples) - samples.size
+      lse(samples) - log(samples.size)
     })
     lls.sum
   }
@@ -275,8 +277,7 @@ object NTFMInfer {
 
     val z: Term[DenseVector[Double]] = Term {
       exp(!qi :- lse(!qi))
-    }
-      .initialize { normalize(DenseVector.rand[Double](K), 1.0) }
+    }.initialize { normalize(DenseVector.rand[Double](K), 1.0) }
 
     val topicProbs: Term[Map[Int, Double]] = Term {
       (!z).toArray.zipWithIndex.map(t => t._2 -> t._1).toMap

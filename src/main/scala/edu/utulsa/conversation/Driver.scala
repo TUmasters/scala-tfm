@@ -88,7 +88,43 @@ object Driver extends CLIApp {
       override val name: String = "evaluate"
       override val help: String = "Evaluates an existing model on a new dataset."
 
-      override def exec(): Unit = ???
+      algorithm.register
+      corpusFile.register
+
+      val testSize: Param[Int] = Param("test-size")
+        .help("Number of conversations to use for the test set.")
+        .default(500)
+        .register
+
+      val resultsFile: Param[File] = Param("results-file")
+        .help("File to store JSON-formatted evaluation results in.")
+        .default { new File($(corpusFile).getParent + "/" + $(algorithm).name + "/results.json") }
+        .register
+
+      override def exec(): Unit = {
+        println("Loading corpus...")
+        val corpus: Corpus = Corpus.load($(corpusFile))
+        println("Generating test/train split...")
+        val (testDocs: Seq[Document], trainDocs: Seq[Document]) = corpus.roots.splitAt($(testSize))
+//        val test = Corpus(testDocs.flatMap(corpus.expand(_)), corpus.words, corpus.authors)
+        val train = Corpus(trainDocs.flatMap(corpus.expand(_)), corpus.words, corpus.authors)
+        println(s"Training ${$(algorithm).name}...")
+        val alg: TMAlgorithm = $(algorithm).exec()
+        val model: TopicModel = alg.train(train)
+        println("Done.")
+        val ll1 = model.score
+        val ll2 = model.logLikelihood(corpus)
+        println(s" Perplexity: $ll1")
+        println(s" Left-out likelihood: ${ll2 - ll1}")
+        import edu.utulsa.util.writeJson
+        writeJson($(resultsFile), Map(
+          "score" -> model.score,
+          "lo-score" -> (ll2 - ll1),
+          "test-size" -> $(testSize),
+          "train-num-docs" -> train.size,
+          "test-num-docs" -> (corpus.size - train.size)
+        ))
+      }
     })
     .register
 
