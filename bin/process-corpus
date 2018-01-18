@@ -26,8 +26,8 @@ with open(input_file, 'r') as f:
 corpus = parse_corpus(document_data)
 roots = find_roots(corpus)
 
-invalid_content = ["[deleted]", "[removed]"]
-invalid_authors = ["AutoModerator", "DeltaBot", "[deleted]", "[removed]"]
+invalid_content = ["[deleted]", "[removed]", None]
+invalid_authors = ["AutoModerator", "DeltaBot", "[deleted]", "[removed]", None]
 
 ## Filter out comments that were deleted or authors lost
 to_prune = [d for d in corpus if d.content in invalid_content or d.author in invalid_authors]

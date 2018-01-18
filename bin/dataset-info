@@ -1,0 +1,34 @@
+#!/usr/bin/env python3
+
+from _document import parse_corpus, find_roots
+import json
+import argparse
+import itertools
+
+parser = argparse.ArgumentParser(description='Trains LDA on textual data.')
+parser.add_argument('corpus_file', type=str, metavar='D', help='file with documents.')
+
+args = parser.parse_args()
+
+documents = json.load(open(args.corpus_file, 'r'))
+for document in documents:
+    document['reply_to'] = document['parent']
+    document['parent'] = None
+
+corpus = parse_corpus(documents)
+roots = find_roots(corpus)
+num_words = len(set(itertools.chain(*[document.words for document in corpus])))
+avg_words = sum([len(document.words) for document in corpus]) / len(corpus)
+avg_depth = sum([root.depth for root in roots]) / len(roots)
+avg_size  = sum([root.size for root in roots]) / len(roots)
+
+print("""
+CORPUS STATS:
+ filename:            {}
+ # of documents:      {}
+ # of conversations:  {}
+ # of words:          {}
+ avg. words/document: {:.2f}
+ avg. conv. depth:    {:.2f}
+ avg. conv. size:     {:.2f}
+""".format(args.corpus_file, len(corpus), len(roots), num_words, avg_words, avg_depth, avg_size))

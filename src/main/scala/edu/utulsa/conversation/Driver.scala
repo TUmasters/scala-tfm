@@ -55,8 +55,10 @@ object Driver extends CLIApp {
         .validation(validators.INT_GEQ(1))
         .register
 
-      override def exec(): TMAlgorithm =
+      override def exec(): TMAlgorithm = {
+        println(s"UATFM topics: ${$(numTopics)} groups: ${$(numUserGroups)} maxEIterations: ${$(numEIterations)}")
         new UATFMAlgorithm($(numTopics), $(numUserGroups), $(numIterations), $(numEIterations))
+      }
     })
 
   val action: Action[Unit] = Action("action")
@@ -124,6 +126,64 @@ object Driver extends CLIApp {
           "train-num-docs" -> train.size,
           "test-num-docs" -> (corpus.size - train.size)
         ))
+      }
+    })
+    .add(new Command[Unit] {
+      override def name = "evaluate-convs"
+      override def help = "Evaluate the topic model against conversations of a particular depth."
+
+      algorithm.register
+      corpusFile.register
+
+      val convDepth: Param[Int] = Param("depth")
+        .help("Depth of conversations to use for training set.")
+        .default(2)
+        .register
+
+      val resultsFile: Param[File] = Param("results-file")
+        .help("File to store JSON-formatted evaluation results in.")
+        .default { new File($(corpusFile).getParent + "/" + $(algorithm).name + "/results.json") }
+        .register
+
+      def split(corpus: Corpus, depth: Int): Corpus = {
+        val docs: Seq[Document] = corpus.roots.flatMap(corpus.expand(_, depth = depth))
+        Corpus(docs, corpus.words, corpus.authors)
+      }
+      override def exec(): Unit = {
+        println(s"Evaluating on conversations of depth ${$(convDepth)}.")
+        println("Loading corpus...")
+        val corpus: Corpus = Corpus.load($(corpusFile))
+        val train: Corpus = split(corpus, $(convDepth))
+        val d10: Corpus = split(corpus, 10)
+        val d4: Corpus = split(corpus, 4)
+        val d5: Corpus = split(corpus, 5)
+        val trainSize: Int = train.size
+        val testSize: Int = corpus.size - train.size
+        val d10Size: Int = corpus.size - d10.size
+
+        println(s"Training ${$(algorithm).name}")
+        println(s" Train size: $trainSize Test size: $testSize")
+        val alg: TMAlgorithm = $(algorithm).exec()
+        val model: TopicModel = alg.train(train)
+
+        val ll1 = model.score
+        val ll2 = model.logLikelihood(corpus)
+        val lld10 = model.logLikelihood(d10)
+        val lld4 = model.logLikelihood(d4)
+        val lld5 = model.logLikelihood(d5)
+        import edu.utulsa.util.writeJson
+        writeJson($(resultsFile), Map(
+          "depth" -> $(convDepth),
+          "score" -> model.score,
+          "lo-score" -> (ll2 - ll1),
+          "perplexity" -> ((ll2 - ll1) / testSize),
+          "d10-perplexity" -> ((ll2 - lld10) / d10Size),
+          "train-size" -> trainSize,
+          "test-size" -> testSize
+        ))
+        println(s" Perplexity: ${(ll2 - ll1) / testSize}")
+        println(s" Depth 10 perplexity: ${(ll2 - lld10) / d10Size}")
+        println(s" Depth 5 perplexity: ${(lld5 - lld4) / (d5.size - d4.size)}")
       }
     })
     .register

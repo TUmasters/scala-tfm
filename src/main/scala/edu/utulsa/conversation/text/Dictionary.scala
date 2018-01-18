@@ -5,7 +5,7 @@ import java.io.{File, PrintWriter}
 class Dictionary(private val w2i: Map[String, Int]) extends Iterable[Int] {
   lazy private val i2w: Map[Int, String] =
     w2i
-      .map { case (w: String, i: Int) => (i, w) }
+      .map { case (w, i: Int) => (i, w) }
       .toMap
 
   lazy val ids: Seq[Int] = w2i.values.toSeq
@@ -18,7 +18,7 @@ class Dictionary(private val w2i: Map[String, Int]) extends Iterable[Int] {
   override def size: Int = w2i.size
   override def iterator: Iterator[Int] = ids.iterator
 
-  def save(file: File) = {
+  def save(file: File): Unit = {
     file.createNewFile()
     Some(new PrintWriter(file)).foreach { (p) =>
       w2i.foreach { case (w, i) =>

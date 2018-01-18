@@ -33,7 +33,7 @@ def prune(corpus, to_prune):
 
 
 class Document:
-    def __init__(self, id, author, content, reply_to=None, replies=None, **kwargs):
+    def __init__(self, id, author, content=None, reply_to=None, replies=None, **kwargs):
         self.__dict__.update(kwargs)
         self.id = id
         self.author = author
@@ -91,6 +91,13 @@ class Document:
         else:
             return 1
 
+    @cached_property
+    def level(self):
+        if self.parent:
+            return 1 + self.parent.level
+        else:
+            return 0
+
     def __repr__(self):
         return "({}){} {} [{}] \n\"\"\"\n{}\n\"\"\"".format(
             self.id, '*' if self.is_root else '',
@@ -109,3 +116,4 @@ def _expand(document, corpus):
     elif document.parent_id: ## if the corpus includes the parent of each document
         document.parent = corpus[document.parent_id]
         document.parent.replies.append(document)
+

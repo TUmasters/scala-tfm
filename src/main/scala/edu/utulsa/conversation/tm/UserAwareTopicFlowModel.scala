@@ -16,6 +16,7 @@ class UserAwareTopicFlowModel
   val authors: Dictionary,
   override val documentInfo: Map[String, List[TPair]],
   override val wordInfo: Map[String, List[TPair]],
+  val userGroups: Map[String, List[TPair]],
   val pi: Array[DenseVector[Double]],
   val phi: DenseVector[Double],
   val a: Array[DenseMatrix[Double]],
@@ -30,7 +31,9 @@ class UserAwareTopicFlowModel
     "num-user-groups" -> numUserGroups
   )
   override protected def saveModel(dir: File): Unit = {
+    writeJson(new File(dir + f"user-groups.json"), userGroups)
     csvwrite(new File(dir + "/theta.csv"), theta)
+    edu.utulsa.util.math.csvwritevec(new File(dir + f"/phi.csv"), phi)
     for(i <- 0 until numUserGroups) {
       edu.utulsa.util.math.csvwritevec(new File(dir + f"/pi.g$i%02d.csv"), pi(i))
       csvwrite(new File(dir + f"/a.g$i%02d.csv"), a(i))
@@ -54,12 +57,25 @@ trait UATFMParams extends TermContainer {
     pi.map(log(_))
   }
   val phi: DenseVector[Double]
-  val logPhi: Term[DenseVector[Double]] = Term{
+  val logPhi: Term[DenseVector[Double]] = Term {
     log(phi)
+  }
+  val logSumPi: Term[DenseVector[Double]] = Term {
+    val sumPi: DenseVector[Double] = pi.zipWithIndex
+      .map { case (pi_g, g) => pi_g :* phi(g) }
+      .reduce(_ + _)
+    log(sumPi)
   }
   val a: Array[DenseMatrix[Double]]
   val logA: Term[Array[DenseMatrix[Double]]] = Term {
     a.map(log(_))
+  }
+  // Used as a ``normalizing constant'' for the variational inference step of each user's group
+  val logSumA: Term[DenseMatrix[Double]] = Term {
+    val sumA: DenseMatrix[Double] = a.zipWithIndex
+      .map { case (a_g, g) => a_g :* phi(g) }
+      .reduce(_ + _)
+    log(sumA)
   }
   val theta: DenseMatrix[Double]
   val logTheta: Term[DenseMatrix[Double]] = Term {
@@ -114,12 +130,12 @@ class UATFMOptimizer
 ) extends UATFMParams {
 
   def train(): UserAwareTopicFlowModel = {
-    println(f"${0}%4d init   ${UATFMInfer.fastApproxLikelihood(trees)}%12.4f ~ ${UATFMInfer.approxLikelihood(trees, dnodes, unodes)}%12.4f")
+    println(f"${0}%4d init ${UATFMInfer.approxLikelihood(trees, dnodes, unodes)}%12.4f")
     (1 to numIterations).foreach { (interval) =>
       eStep(interval)
-      println(f"$interval%4d e-step ${UATFMInfer.fastApproxLikelihood(trees)}%12.4f ~ ${UATFMInfer.approxLikelihood(trees, dnodes, unodes)}%12.4f")
+      println(f"$interval%4d e-step ${UATFMInfer.approxLikelihood(trees, dnodes, unodes)}%12.4f")
       mStep(interval)
-      println(f"$interval%4d m-step ${UATFMInfer.fastApproxLikelihood(trees)}%12.4f ~ ${UATFMInfer.approxLikelihood(trees, dnodes, unodes)}%12.4f")
+      println(f"$interval%4d m-step ${UATFMInfer.approxLikelihood(trees, dnodes, unodes)}%12.4f")
     }
     val d: Map[String, List[TPair]] = dnodes.map((node) =>
       node.document.id ->
@@ -129,7 +145,12 @@ class UATFMOptimizer
       corpus.words(w) ->
         theta(w, ::).t.toArray.zipWithIndex.map { case (p, i) => TPair(p, i) }.sortBy(-_.p).toList
     ).toMap
-    new UserAwareTopicFlowModel(numTopics, numUserGroups, corpus, corpus.authors, d, w, pi, phi, a, theta)
+    val userGroups: Map[String, List[TPair]] = unodes.map((node) => {
+      var name: String = corpus.authors(node.user)
+      if(name == null) name = "[null]"
+      name -> List((!node.r).toArray.zipWithIndex.map { case (p, i) => TPair(p, i) }.maxBy(_.p))
+    }).toMap
+    new UserAwareTopicFlowModel(numTopics, numUserGroups, corpus, corpus.authors, d, w, userGroups, pi, phi, a, theta)
   }
 
   val N: Int = corpus.size
@@ -144,7 +165,7 @@ class UATFMOptimizer
 
   /** MODEL PARAMETERS **/
   val pi: Array[DenseVector[Double]]    = (1 to G).map(_ => normalize(DenseVector.rand(K))).toArray // k x g
-  val phi: DenseVector[Double]          = normalize(DenseVector.rand(G-1), 1.0) // 1 x g
+  val phi: DenseVector[Double]          = normalize(DenseVector.rand(G), 1.0) // 1 x g
   val a: Array[DenseMatrix[Double]]     = (1 to G).map(_ => normalize(DenseMatrix.rand(K, K), Axis._1, 1.0)).toArray // g x k x k
   val theta: DenseMatrix[Double]        = normalize(DenseMatrix.rand(M, K), Axis._0, 1.0) // m x k
 
@@ -219,7 +240,7 @@ class UATFMOptimizer
         }
       },
       () => {
-        phi := normalize(unodes.map(n => (!n.r) (1 until G)).reduce(_ + _) :+ (1e-3/(G-1)), 1.0)
+        phi := normalize(unodes.map(n => !n.r).reduce(_ + _) :+ (1e-3/G), 1.0)
       },
       () => {
         // A maximization
@@ -284,32 +305,26 @@ object UATFMInfer {
     import params._
     import edu.utulsa.util.math._
 
-    var dist: Double = G
+    def dist: Double = norm(!r :- oldR)
 
+    val oldR: DenseVector[Double] = DenseVector.zeros[Double](G)
     val r: Term[DenseVector[Double]] = Term {
       //      val oldR = (!r).copy
       val n: DenseVector[Double] = DenseVector.zeros[Double](G)
-      if(documents.length <= 2 || G <= 1) {
-        n(0) = 1d
-      }
-      else {
-        n(1 until G) := !logPhi
-        n(1 until G) :+= documents.map { case (node) =>
-          node.parent match {
-            case None =>
-              DenseVector[Double]((1 until G).map((g) =>
-                log(pi(g) dot !node.z)
-              ).toArray)
-            case Some(parent) =>
-              DenseVector[Double]((1 until G).map((g) =>
-                log((!parent.z).t * a(g) * !node.z)
-              ).toArray)
-          }
-        }.reduce(_ + _)
-        n(1 until G) := exp(n(1 until G) :- lse(n(1 until G)))
-        if(n(0) > 0)
-          println(n)
-      }
+      n := !logPhi
+      n :+= documents.map { case (node) =>
+        node.parent match {
+          case None =>
+            DenseVector[Double]((0 until G).map((g) =>
+              ((!logPi)(g) - !logSumPi) dot !node.z
+            ).toArray)
+          case Some(parent) =>
+            DenseVector[Double]((0 until G).map((g) =>
+              (!parent.z).t * ((!logA)(g) - !logSumA) * !node.z
+            ).toArray)
+        }
+      }.reduce(_ + _)
+      n := exp(n :- lse(n))
       n
     }.initialize {
       val n = DenseVector.zeros[Double](G)
@@ -329,6 +344,11 @@ object UATFMInfer {
 
     val groupProbs: Term[Map[Int, Double]] = Term {
       (!r).toArray.zipWithIndex.map(t => (t._2, t._1)).toMap
+    }
+
+    override def reset(): Unit = {
+      oldR := !r
+      super.reset()
     }
   }
 
@@ -372,7 +392,7 @@ object UATFMInfer {
     }
 
     val lambdaMsg: Term[DenseVector[Double]] = Term {
-      lse((0 until G).map((g) => lse(a(g), !lambda) :+ log((!author.r)(g))).toArray)
+      lse((0 until G).map((g) => lse(a(g), !lambda) * (!author.r)(g)).toArray)
     }
 
     val tau: Term[DenseVector[Double]] = Term {
@@ -391,8 +411,9 @@ object UATFMInfer {
       }
     }
 
-    var dist: Double = K
+    def dist: Double = norm(!z - oldZ)
 
+    val oldZ: DenseVector[Double] = DenseVector.zeros[Double](K)
     val z: Term[DenseVector[Double]] = Term {
 //      val oldZ = (!z).copy
       val tmp = !lambda :+ !tau
@@ -426,6 +447,11 @@ object UATFMInfer {
       }
 //      val term2: Double = replies.foldLeft(0d)((p, reply) => p + reply.logP(topics, groups))
       term1
+    }
+
+    override def reset(): Unit = {
+      oldZ := !z
+      super.reset()
     }
   }
 

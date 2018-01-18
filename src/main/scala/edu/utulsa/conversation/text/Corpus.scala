@@ -105,6 +105,9 @@ object Corpus {
       else {
         val words = Dictionary(data.flatMap(_.words).toSet)
         val authors = Dictionary(data.map(_.author).toSet)
+//        corpusDir.mkdirs()
+//        words.save(new File(corpusDir + "/words.csv"))
+//        authors.save(new File(corpusDir + "/authors.csv"))
         (words, authors)
       }
     val documents: Seq[Document] = data.map {

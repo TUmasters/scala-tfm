@@ -1,0 +1,62 @@
+#!/usr/bin/env python3
+
+import argparse
+import json
+import numpy as np
+import os, shutil
+from _document import parse_corpus
+
+## Process documents
+
+def run_depth_tests(corpus_file, num_topics):
+    print('Loading...')
+    if not os.path.exists(corpus_file):
+        print("Could not find file '{}'.".format(corpus_file))
+        return
+    with open(corpus_file, 'r') as f:
+        data = json.load(f)
+
+    for item in data:
+        item['reply_to'] = item['parent']
+        item['parent'] = None
+
+    corpus = parse_corpus(data)
+
+    print('Vectorizing...')
+    from sklearn.feature_extraction.text import CountVectorizer
+    vectorizer = CountVectorizer()
+    X = vectorizer.fit_transform([str.join(' ', document.words) for document in corpus])
+    n = len(data)
+
+    for depth in range(1, 11):
+        idx_d = np.array(
+            [index for index, document in enumerate(corpus) if document.level <= depth]
+        )
+        X_d = X[idx_d, :]
+        print("depth {}".format(depth))
+        run_lda(X, X_d, num_topics)
+
+def run_lda(X, X_d, num_topics):
+    from sklearn.decomposition import LatentDirichletAllocation
+
+    train_size = X_d.shape[0]
+    test_size = X.shape[0] - X_d.shape[0]
+
+    print(" train: {:6d} test: {:6d}".format(train_size, test_size))
+
+    lda = LatentDirichletAllocation(n_components=num_topics)
+    lda.fit(X_d)
+    ll1 = lda.score(X_d)
+    ll2 = lda.score(X)
+
+    print(" Score:           {}".format(ll1))
+    print(" Test perplexity: {}".format((ll2-ll1) / test_size))
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Trains LDA on textual data.')
+    parser.add_argument('corpus_file', type=str, metavar='D', help='file with documents.')
+    parser.add_argument('--num-topics', type=int, help='number of documents to train on.', default=25)
+
+    args = parser.parse_args()
+    run_depth_tests(args.corpus_file, args.num_topics)

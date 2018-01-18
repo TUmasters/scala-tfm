@@ -34,8 +34,8 @@ document_data = {data['id']:data for data in json.load(open(data_file, 'r'))}
 document_topics = json.load(open(document_topics_file, 'r'))
 word_topics = json.load(open(word_topics_file, 'r'))
 model_params = json.load(open(model_params_file, 'r'))
-a = np.loadtxt(model_path + '/a.mat', delimiter=',')
-pi = np.loadtxt(model_path + '/pi.mat', delimiter=',')
+# a = np.loadtxt(model_path + '/a.mat', delimiter=',')
+# pi = np.loadtxt(model_path + '/pi.mat', delimiter=',')
 
 num_topics = model_params['num-topics']
 num_words = model_params['num-words']
@@ -147,13 +147,13 @@ def transition_stats(title, probs):
 
 def topic_stats(topic_id):
     html = '<h1>stats</h1><br /><div class="content">'
-    in_probs = a[:, topic_id]
-    out_probs = a[topic_id, :]
-    in_degree = sum(in_probs)
-    html += '<p><b>entrance probability</b> {:.4f}</p>'.format(pi[topic_id])
-    html += '<p><b>weighted in-degree</b> {:.4f}</p>'.format(in_degree)
-    html += transition_stats('parent probabilities', in_probs)
-    html += transition_stats('response probabilities', out_probs)
+    # in_probs = a[:, topic_id]
+    # out_probs = a[topic_id, :]
+    # in_degree = sum(in_probs)
+    # html += '<p><b>entrance probability</b> {:.4f}</p>'.format(pi[topic_id])
+    # html += '<p><b>weighted in-degree</b> {:.4f}</p>'.format(in_degree)
+    # html += transition_stats('parent probabilities', in_probs)
+    # html += transition_stats('response probabilities', out_probs)
     html += '</div>'
     return html
 
