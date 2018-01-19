@@ -18,35 +18,23 @@ abstract class TMAlgorithm(val numTopics: Int) {
 
 abstract class TopicModel
 (
-  val numTopics: Int,
-  val corpus: Corpus,
-  val documentInfo: Map[String, List[TPair]],
-  val wordInfo: Map[String, List[TPair]]
+  val numTopics: Int
 ) {
 
+  protected def saveModel(dir: File): Unit
   def save(dir: File): Unit = {
     if(dir.exists())
       dir.delete()
     dir.mkdirs()
     saveModel(dir)
-    saveData(dir)
+    writeJson(new File(dir + "/params.json"), params)
   }
 
   def params: Map[String, AnyVal] = Map(
-    "num-topics" -> numTopics,
-    "num-documents" -> corpus.size,
-    "num-words" -> corpus.words.size,
-    "num-authors" -> corpus.authors.size,
-    "score" -> score,
-    "bic" -> bic,
-    "aic" -> aic
+    "num-topics" -> numTopics
   )
 
-  def saveData(dir: File): Unit = {
-    writeJson(new File(dir + "/document-topics.json"), documentInfo)
-    writeJson(new File(dir + "/word-topics.json"), wordInfo)
-    writeJson(new File(dir + "/params.json"), params)
-  }
+  def train(corpus: Corpus): Unit
 
   protected def writeJson[A <: AnyRef](file: File, a: A): Unit = {
     import org.json4s._
@@ -60,14 +48,5 @@ abstract class TopicModel
       .foreach { (p) => p.write(writePretty(a)); p.close() }
   }
 
-  protected def saveModel(dir: File): Unit
-
   def logLikelihood(corpus: Corpus): Double
-
-  lazy val score: Double = logLikelihood(corpus)
-  lazy val bic: Double = {
-    val n = corpus.documents.map(document => document.words.size).sum
-    math.log(n) * numTopics + 2 * logLikelihood(corpus)
-  }
-  lazy val aic: Double = 2 * numTopics + 2 * logLikelihood(corpus)
 }

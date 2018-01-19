@@ -33,7 +33,8 @@ class Corpus private (
   val words: Dictionary,
   val authors: Dictionary,
   val replies: Map[Document, Seq[Document]],
-  val parent: Map[Document, Document]
+  val parent: Map[Document, Document],
+  val path: File = null
 ) extends Iterable[Document] {
   lazy val index: Map[Document, Int] = documents.zipWithIndex.toMap
 
@@ -45,7 +46,7 @@ class Corpus private (
   def ++(c2: Corpus): Corpus = {
     require(words == c2.words, "Corpuses do not share words.")
     require(authors == c2.authors, "Corpuses do not share authors.")
-    Corpus(documents ++ c2.documents, words, authors)
+    Corpus(documents ++ c2.documents, words, authors, null)
   }
 
   def expand(document: Document, depth: Int = Int.MaxValue): Seq[Document] = {
@@ -122,15 +123,15 @@ object Corpus {
         }
         new Document(data.id, data.parent, authors(data.author), words(data.words))
     }
-    Corpus(documents, words, authors)
+    Corpus(documents, words, authors, file)
   }
 
-  def apply(documents: Seq[Document], words: Dictionary, authors: Dictionary): Corpus = {
+  def apply(documents: Seq[Document], words: Dictionary, authors: Dictionary, path: File = null): Corpus = {
     val m: Map[String, Document] = documents.map(d => d.id -> d).toMap
     val replies: Map[Document, Seq[Document]] = m.values.filter(_.parentId != null).groupBy(_.parentId).map {
       case (p, r) => m(p) -> r.toSeq
     }
     val parent: Map[Document, Document] = m.values.filter(_.parentId != null).map(d => d -> m(d.parentId)).toMap
-    new Corpus(m.values.toSeq, words, authors, replies, parent)
+    new Corpus(m.values.toSeq, words, authors, replies, parent, path)
   }
 }
