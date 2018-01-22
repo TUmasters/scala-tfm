@@ -26,58 +26,77 @@ class CITFM
     val inference = new CITFMInfer(corpus, this)
     val numAuthors = corpus.authors.size
     import inference._
-    def eStep(): Unit = {
-      // Update variational hyperparameters
-//      println("  gamma")
-      gamma0.update()
-      gamma.update()
-//      println("  zeta")
-      zeta.update()
-//      println("  eta")
-      eta.update()
-//      println("  dgGamma0")
-      dgGamma0.update()
-//      println("  dgGamma")
-      dgGamma.update()
-//      println("  dgZeta")
-      dgZeta.update()
-//      println("  dgEta")
-      dgEta.update()
 
-      // Update document-specific variational parameters
-      // NOTE: Not doing this in any particular order right now! Might result in slowness.
-      println("   psi + phi")
-      for(_ <- 1 to 10) {
-        nodes.par.foreach { node =>
-          node.psi.update()
-          node.phi.update()
-        }
-      }
-    }
+    val K = numTopics.toDouble
+    val U = numAuthors.toDouble
     def mAlpha(): Unit = {
       val c: DenseVector[Double] = !dgGamma0 + sum(!dgGamma, Axis._1)
-      val g = (x: DenseVector[Double]) => (-digamma(x) + digamma(sum(x))) * (numTopics+1.0) + c
-      val hq = (x: DenseVector[Double]) =>  trigamma(x) * (-numTopics-1.0)
-      val hz = (x: DenseVector[Double]) => trigamma(sum(x)) * (numTopics + 1.0)
+      val g = (x: DenseVector[Double]) => (-digamma(x) + digamma(sum(x))) * (K+1) + c
+      val hq = (x: DenseVector[Double]) =>  -trigamma(x) * (K+1)
+      val hz = (x: DenseVector[Double]) => trigamma(sum(x)) * (K+1)
       alpha := newton(alpha, g, hq, hz)
     }
     def mBeta(): Unit = {
       val c: DenseVector[Double] = sum(!dgZeta, Axis._1)
-      val g = (x: DenseVector[Double]) => (-digamma(x) + digamma(sum(x))) * numTopics.toDouble + c
-      val hq = (x: DenseVector[Double]) => -numTopics.toDouble * trigamma(x)
-      val hz = (x: DenseVector[Double]) => numTopics.toDouble * trigamma(sum(x))
+      println(c)
+      val g = (x: DenseVector[Double]) => (-digamma(x) + digamma(sum(x))) * K + c
+      val hq = (x: DenseVector[Double]) => -K * trigamma(x)
+      val hz = (x: DenseVector[Double]) => K * trigamma(sum(x))
       beta := newton(beta, g, hq, hz)
     }
     def mDelta(): Unit = {
-      val c: DenseVector[Double] = numAuthors.toDouble * (digamma(!eta) - digamma(sum(!eta)))
-      val g = (x: DenseVector[Double]) => (-digamma(x) + digamma(sum(x))) * numAuthors.toDouble + c
-      val hq = (x: DenseVector[Double]) => -numAuthors.toDouble * trigamma(x)
-      val hz = (x: DenseVector[Double]) => numAuthors.toDouble * trigamma(sum(x))
+      val c: DenseVector[Double] = U * (digamma(!eta) - digamma(sum(!eta)))
+      val g = (x: DenseVector[Double]) => (-digamma(x) + digamma(sum(x))) * U + c
+      val hq = (x: DenseVector[Double]) => -U * trigamma(x)
+      val hz = (x: DenseVector[Double]) => U * trigamma(sum(x))
       delta := newton(delta, g, hq, hz)
     }
+
+    def eStep(): Unit = {
+      // Update variational hyperparameters
+      gamma0.update()
+      gamma.update()
+      zeta.update()
+      eta.update()
+      dgGamma0.update()
+      dgGamma.update()
+      dgZeta.update()
+      dgEta.update()
+
+      println("  gamma")
+      println(!gamma0)
+      println(!gamma)
+      println("  zeta")
+      print((!zeta)(0 until 10, ::))
+      println("  eta")
+      println(!eta)
+      println("  dgGamma0")
+      println("  dgGamma")
+      println("  dgZeta")
+      println("  dgEta")
+
+      // Update document-specific variational parameters
+      // NOTE: Not doing this in any particular order right now! Might result in slowness.
+      println("   psi + phi")
+      println(!nodes.head.psi)
+      println(!nodes.head.phi)
+      for(t <- 1 to 10) {
+        println(t)
+        nodes.foreach { node =>
+          node.psi.update()
+          node.phi.update()
+        }
+        println(!nodes.head.psi)
+        println(!nodes.head.phi)
+      }
+      println()
+    }
     def mStep(): Unit = {
+      println("  alpha")
       mAlpha()
+      println("  beta")
       mBeta()
+      println("  delta")
       mDelta()
     }
 
@@ -112,6 +131,8 @@ sealed class CITFMInfer
 ) {
   import params._
 
+  val ZERO: DenseVector[Double] = DenseVector.zeros[Double](numTopics)
+
   val nodes: Seq[DNode] = corpus.extend(new DNode(_, _))
   val roots: Seq[DNode] = nodes.filter(_.isRoot)
   val responses: Seq[DNode] = nodes.filter(!_.isRoot)
@@ -128,7 +149,7 @@ sealed class CITFMInfer
   }
     .initialize(DenseVector.rand[Double](numTopics))
   val gamma: Term[DenseMatrix[Double]] = Term {
-    val m = DenseMatrix.zeros[Double](numTopics, numTopics)
+    val m = DenseMatrix.ones[Double](numTopics, numTopics)
     m
   }
     .initialize(DenseMatrix.rand[Double](numTopics, numTopics))
@@ -137,9 +158,9 @@ sealed class CITFMInfer
     * Word distribution free hyperparameters
     */
   val zeta: Term[DenseMatrix[Double]] = Term {
-    val m = tile(beta, 1, numTopics).t
-    for(w <- 1 until numWords) {
-      m(::, w) :+= words(w).map(!_.phi).reduce(_ + _)
+    val m = tile(beta, 1, numTopics)
+    for(w <- 0 until numWords) {
+      m(w, ::) :+= words(w).map(!_.phi).fold(DenseVector.zeros[Double](numTopics))(_ + _).t
     }
     m
   }.initialize(DenseMatrix.rand[Double](numTopics, numWords))
@@ -150,9 +171,9 @@ sealed class CITFMInfer
 
   // These values have to be computed a lot, so let's cache them to save time.
   val dgGamma0: Term[DenseVector[Double]] = Term { digamma(!gamma0) - digamma(sum(!gamma0)) }
-  val dgGamma: Term[DenseMatrix[Double]] = Term { digamma(!gamma) - tile(digamma(sum(!gamma, Axis._0)), numTopics, 1) }
-  val dgZeta: Term[DenseMatrix[Double]] = Term { digamma(!zeta) - tile(digamma(sum(!zeta, Axis._0)), numTopics, 1) }
-  val dgEta: Term[Double] = Term { digamma((!eta)(1)) - digamma((!eta)(2)) }
+  val dgGamma: Term[DenseMatrix[Double]] = Term { digamma(!gamma) - tile(digamma(sum(!gamma, Axis._1)), 1, numTopics) }
+  val dgZeta: Term[DenseMatrix[Double]] = Term { digamma(!zeta) - tile(digamma(sum(!zeta, Axis._1)), 1, numTopics) }
+  val dgEta: Term[Double] = Term { digamma((!eta)(0)) - digamma((!eta)(1)) }
 
   class DNode(override val document: Document, override val index: Int) extends DocumentNode[DNode](document, index) {
     val psi: Term[Double] = Term {
@@ -166,9 +187,9 @@ sealed class CITFMInfer
     }.initialize(Random.nextDouble())
 
     val phi: Term[DenseVector[Double]] = Term {
-      val t1: DenseVector[Double] = document.words.map(w => (!dgZeta)(::, w)).reduce(_ + _)
+      val t1: DenseVector[Double] = document.words.map(w => (!dgZeta)(w, ::).t).fold(ZERO)(_ + _)
       val t2: DenseVector[Double] = parent match {
-        case Some(p) => sum(tile((!p.phi).t, numTopics, 1) :* (
+        case Some(p) => sum(tile(!p.phi, 1, numTopics) :* (
           !psi * logRho +
             (1 - !psi) * (!dgGamma).t
         ), Axis._1)
@@ -177,7 +198,7 @@ sealed class CITFMInfer
       val t3: DenseVector[Double] = replies.length match {
         case 0 => DenseVector.zeros[Double](numTopics)
         case _ => replies.map(r =>
-          sum(tile((!r.phi).t, numTopics, 1) :* (
+          sum(tile(!r.phi, 1, numTopics) :* (
             (!r.psi) * logRho +
               (1 - !r.psi) * !dgGamma
           ), Axis._1)

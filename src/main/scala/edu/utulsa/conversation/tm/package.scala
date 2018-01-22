@@ -19,12 +19,14 @@ package object tm {
                          hz: DenseVector[Double] => Double,
                          maxIter: Int = 10, stepThresh: Double = 1e-2): DenseVector[Double] = {
     def step(x: DenseVector[Double]): (DenseVector[Double], Double) = {
+      println(s" value: $x")
+      println(s"  grad: ${norm(g(x))}")
       val grad = g(x)
       val q = hq(x)
       val z: Double = hz(x)
       val b = sum(grad :/ q) / ((1.0 / z) + sum(q.map(1.0/_)))
       val step = (grad - b) :/ q
-      (step, norm(step))
+      (x - step, norm(step))
     }
     var value = initialValue.copy
     var iter = 0
