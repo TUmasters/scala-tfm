@@ -2,8 +2,11 @@ package edu.utulsa.util
 
 import java.io.{File, PrintWriter}
 
+import breeze.generic.{MappingUFunc, UFunc}
 import breeze.linalg._
 import breeze.numerics.{exp, log}
+import com.sun.javaws.exceptions.InvalidArgumentException
+import org.apache.commons.math3.special.Gamma
 
 package object math {
   def lse(x: Iterable[Double]): Double = {
@@ -88,5 +91,23 @@ package object math {
         return item  // return so that we don't have to search through the whole distribution
     }
     sys.error(f"this should never happen")  // needed so it will compile
+  }
+
+  /**
+    * Based on scipy's implementation at https://github.com/scipy/scipy/blob/v1.0.0/scipy/special/basic.py#L843
+    */
+  implicit object polygamma extends UFunc with MappingUFunc {
+    implicit object polygammaImpl2Double extends Impl2[Int, Double, Double] {
+      def apply(n: Int, x: Double): Double = {
+        if(n == 0) Gamma.digamma(x)
+        else Math.pow(-1.0, n+1) * Gamma.gamma(n+1.0) * Zeta.zeta(n+1, x)
+      }
+    }
+  }
+
+  implicit object tetragamma extends UFunc with MappingUFunc {
+    implicit object tetragammaImplDouble extends Impl[Double, Double] {
+      def apply(x: Double): Double = polygamma(2, x)
+    }
   }
 }

@@ -1,36 +1,41 @@
-//package edu.utulsa.conversation.tm
-//
-//import java.io.File
-//
-//import breeze.linalg._
-//import breeze.numerics._
-//import edu.utulsa.conversation.text.{Corpus, Dictionary, Document}
-//
-//class LDA
-//(
-//  override val numTopics: Int,
-//  override val corpus: Corpus,
-//  override val documentInfo: Map[String, List[TPair]],
-//  override val wordInfo: Map[String, List[TPair]],
-//  val alpha: DenseVector[Double],
-//  val beta: DenseMatrix[Double]
-//) extends TopicModel(numTopics, corpus, documentInfo, wordInfo) {
-//  override protected def saveModel(dir: File): Unit = {
-//    import edu.utulsa.util.math.csvwritevec
-//    csvwritevec(new File(dir + "/alpha.mat"), alpha)
-//    csvwrite(new File(dir + "/beta.mat"), beta)
-//  }
-//
-//  override lazy val params: Map[String, AnyVal] = super.params
-//
-//  override def logLikelihood(corpus: Corpus) = ???
-//}
-//
-//// Implementation of LDA based on Variational Inference EM algorithm
-//// given in http://www.cs.columbia.edu/~blei/papers/BleiLafferty2009.pdf
-//class LDA extends TMAlgorithm {
-//  import edu.utulsa.util.math._
-//
+package edu.utulsa.conversation.tm
+
+import java.io.File
+
+import breeze.linalg._
+import breeze.numerics._
+import edu.utulsa.conversation.text.{Corpus, Document}
+
+class LDA
+(
+  override val numTopics: Int,
+  val numWords: Int
+) extends TopicModel(numTopics) with LDAParams {
+
+  val alpha: DenseVector[Double] = DenseVector.rand(numTopics)
+  val eta: DenseVector[Double] = DenseVector.rand(numWords)
+
+  override protected def saveModel(dir: File): Unit = ???
+
+  override def logLikelihood(corpus: Corpus): Double = ???
+
+  override def train(corpus: Corpus): Unit = ???
+}
+
+trait LDAParams {
+  def numTopics: Int
+  def numWords: Int
+
+  def alpha: DenseVector[Double]
+  def eta: DenseVector[Double]
+}
+
+// Implementation of LDA based on Variational Inference EM algorithm
+// given in http://www.cs.columbia.edu/~blei/papers/BleiLafferty2009.pdf
+class LDAOptimizer(val params: LDAParams) {
+  import params._
+  import edu.utulsa.util.math._
+
 //  def train(corpus: Corpus): LDAModel = {
 //    val N: Int = corpus.size
 //    val M: Int = corpus.words.size
@@ -87,32 +92,34 @@
 //      maximizeAlpha()
 //    }
 //
-//    class DNode(val document: Document) {
-//      val gamma: DenseVector[Double] = alpha.copy
-//      // Use a sparse matrix to save on space :)
-//      val phi: Seq[(Int, Int, DenseVector[Double])] = {
-//        document.count.map { case (word, count) =>
-//          (word, count, DenseVector.zeros[Double](K))
-//        }
-//      }
-//
-//      // Part (2) of Algorithm in Figure 5 of Blei paper
-//      def variationalUpdate(lambda: DenseMatrix[Double], dgLambdaS: DenseVector[Double]): Unit = {
-//        // (a)
-//        if (phi.nonEmpty)
-//          gamma := alpha :+ phi.map { case (w, c, r) => r * (c.toDouble) }.reduce(_ + _)
-//        else
-//          gamma := alpha
-//
-//        val digammaGamma = digamma(gamma)
-//        // (b)
-//        phi.foreach { case (word, count, row) =>
-//          row := digammaGamma :+ digamma(lambda(word, ::).t) :- dgLambdaS :+ log(count)
-//          row := exp(row :- lse(row))
-//        }
-//      }
-//    }
-//
+    class DNode(val document: Document) {
+      val gamma: DenseVector[Double] = alpha.copy
+
+      // Use a sparse matrix to save on space :)
+      val phi: Seq[(Int, Int, DenseVector[Double])] = {
+        document.count.map { case (word, count) =>
+          (word, count, DenseVector.zeros[Double](numTopics))
+        }
+      }
+
+      // Part (2) of Algorithm in Figure 5 of Blei paper
+      def update(lambda: DenseMatrix[Double], dgLambdaS: DenseVector[Double]): Unit = {
+        // (a)
+        if (phi.nonEmpty)
+          gamma := alpha :+ phi.map { case (w, c, r) => r * c.toDouble }.reduce(_ + _)
+        else
+          gamma := alpha
+
+        val digammaGamma = digamma(gamma)
+        // (b)
+        phi.foreach { case (word, count, row) =>
+          row := digammaGamma :+ digamma(lambda(word, ::).t) :- dgLambdaS :+ log(count)
+          row := exp(row :- lse(row))
+        }
+      }
+    }
+
+  //
 //    def maximizeAlpha(): Unit = {
 //      val g2 = nodes.map((n) => digamma(n.gamma) :- digamma(sum(n.gamma))).reduce(_ + _)
 //
@@ -141,4 +148,4 @@
 //
 //    run()
 //  }
-//}
+}

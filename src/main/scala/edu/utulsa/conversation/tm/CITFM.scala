@@ -34,7 +34,7 @@ class CITFM
       val g = (x: DenseVector[Double]) => (-digamma(x) + digamma(sum(x))) * (K+1) + c
       val hq = (x: DenseVector[Double]) =>  -trigamma(x) * (K+1)
       val hz = (x: DenseVector[Double]) => trigamma(sum(x)) * (K+1)
-      alpha := newton(alpha, g, hq, hz)
+      alpha := dirichletNewton(alpha, g, hq, hz)
     }
     def mBeta(): Unit = {
       val c: DenseVector[Double] = sum(!dgZeta, Axis._1)
@@ -42,14 +42,14 @@ class CITFM
       val g = (x: DenseVector[Double]) => (-digamma(x) + digamma(sum(x))) * K + c
       val hq = (x: DenseVector[Double]) => -K * trigamma(x)
       val hz = (x: DenseVector[Double]) => K * trigamma(sum(x))
-      beta := newton(beta, g, hq, hz)
+      beta := dirichletNewton(beta, g, hq, hz)
     }
     def mDelta(): Unit = {
       val c: DenseVector[Double] = U * (digamma(!eta) - digamma(sum(!eta)))
       val g = (x: DenseVector[Double]) => (-digamma(x) + digamma(sum(x))) * U + c
       val hq = (x: DenseVector[Double]) => -U * trigamma(x)
       val hz = (x: DenseVector[Double]) => U * trigamma(sum(x))
-      delta := newton(delta, g, hq, hz)
+      delta := dirichletNewton(delta, g, hq, hz)
     }
 
     def eStep(): Unit = {

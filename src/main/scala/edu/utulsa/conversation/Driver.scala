@@ -45,14 +45,14 @@ object Driver extends CLIApp {
 
       override def exec() = new CITFM($(numTopics), $(corpus).words.size, $(numIterations))
     })
-//    .add(new Command[TMAlgorithm] {
+//    .add(new Command[TopicModel] {
 //      override val name: String = "mtfm"
 //      override val help: String = "Markov Topic Flow Model"
 //
 //      numTopics.register
 //      numIterations.register
 //
-//      override def exec(): TMAlgorithm = new NTFMAlgorithm($(numTopics), $(numIterations))
+//      override def exec(): TMAlgorithm = new MTFM($(numTopics), $(numIterations))
 //    })
 //    .add(new Command[TMAlgorithm] {
 //      override val name: String = "uatfm"
