@@ -23,14 +23,21 @@ class Term[T] private(calc: => T) {
 }
 
 object Term {
-  def apply[T](update: => T): Term[T] = { // (implicit terms: mutable.ListBuffer[Term[_]])
+  def apply[T](update: => T)(implicit terms: mutable.ListBuffer[Term[_]] = null): Term[T] = { // (implicit terms: mutable.ListBuffer[Term[_]])
     val term = new Term(update)
-//    terms += term
+    if(terms != null) terms += term
     term
   }
 }
 
-//trait TermContainer {
-//  implicit protected val terms: mutable.ListBuffer[Term[_]] = mutable.ListBuffer()
-//  def reset(): Unit = terms.foreach(_.reset())
-//}
+trait TermContainer {
+  implicit protected val terms: mutable.ListBuffer[Term[_]] = mutable.ListBuffer()
+  private var warnEmpty = false
+  def reset(): Unit = {
+    if(terms.isEmpty && !warnEmpty) {
+      warnEmpty = true
+      System.err.println("WARNING: Attempted to reset term container with no terms.")
+    }
+    terms.foreach(_.reset())
+  }
+}

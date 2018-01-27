@@ -6,7 +6,7 @@ import breeze.numerics.{digamma, exp, trigamma}
 import edu.utulsa.conversation.text.{Corpus, Document, DocumentNode}
 import edu.utulsa.util.math.{polygamma, tetragamma}
 
-class MMTFM
+class MixedMembershipTFM
 (
   override val numTopics: Int,
   val numWords: Int,
@@ -168,7 +168,7 @@ sealed class MMTFMOptimizer(val corpus: Corpus, val params: MMTFMParams) {
       dist
     }
     def updateLambda(): Double = {
-      val num1: Vector = replies.length * (digamma(sum(g)) - digamma(g))
+      val num1: Vector = replies.length.toDouble * (digamma(sum(g)) - digamma(g))
       val num2: Vector = replies.map(r => digamma(r.gamma) - digamma(sum(r.gamma)))
         .fold(ZERO)(_ + _)
       val den: Double = sum(gamma)
@@ -186,7 +186,7 @@ sealed class MMTFMOptimizer(val corpus: Corpus, val params: MMTFMParams) {
     def updatePhi(): Unit = {
       val t: Vector = digamma(gamma) - digamma(sum(gamma))
       phi.foreach { case (w, (c, phij)) =>
-        phij := normalize(exp(c * (t :+ digamma(beta(w, ::)) - digamma(sum(beta(w, ::)))) + 1.0), 1.0)
+        phij := normalize(exp(c * (t + digamma(beta(w, ::).t) - digamma(sum(beta(w, ::)))) + 1.0), 1.0)
       }
     }
   }

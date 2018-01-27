@@ -45,37 +45,37 @@ object Driver extends CLIApp {
 
       override def exec() = new CITFM($(numTopics), $(corpus).words.size, $(numIterations))
     })
-//    .add(new Command[TopicModel] {
-//      override val name: String = "mtfm"
-//      override val help: String = "Markov Topic Flow Model"
-//
-//      numTopics.register
-//      numIterations.register
-//
-//      override def exec(): TMAlgorithm = new MTFM($(numTopics), $(numIterations))
-//    })
-//    .add(new Command[TMAlgorithm] {
-//      override val name: String = "uatfm"
-//      override val help: String = "User-Aware Topic Flow Model"
-//
-//      numTopics.register
-//      val numUserGroups: Param[Int] = Param("num-user-groups")
-//        .help("Number of user groups for the UATFM.")
-//        .default(10)
-//        .validation(validators.INT_GEQ(1))
-//        .register
-//      numIterations.register
-//      val numEIterations: Param[Int] = Param("num-e-iterations")
-//        .help("Number of iterations to run the variational inference step of the UATFM.")
-//        .default(10)
-//        .validation(validators.INT_GEQ(1))
-//        .register
-//
-//      override def exec(): TMAlgorithm = {
-//        println(s"UATFM topics: ${$(numTopics)} groups: ${$(numUserGroups)} maxEIterations: ${$(numEIterations)}")
-//        new UATFMAlgorithm($(numTopics), $(numUserGroups), $(numIterations), $(numEIterations))
-//      }
-//    })
+    .add(new Command[TopicModel] {
+      override val name: String = "mtfm"
+      override val help: String = "Markov Topic Flow Model"
+
+      numTopics.register
+      numIterations.register
+
+      override def exec(): TopicModel = new MarkovTFM($(numTopics), $(corpus).words.size, $(numIterations))
+    })
+    .add(new Command[TopicModel] {
+      override val name: String = "uatfm"
+      override val help: String = "User-Aware Topic Flow Model"
+
+      numTopics.register
+      val numUserGroups: Param[Int] = Param("num-user-groups")
+        .help("Number of user groups for the UATFM.")
+        .default(10)
+        .validation(validators.INT_GEQ(1))
+        .register
+      numIterations.register
+      val numEIterations: Param[Int] = Param("num-e-iterations")
+        .help("Number of iterations to run the variational inference step of the UATFM.")
+        .default(10)
+        .validation(validators.INT_GEQ(1))
+        .register
+
+      override def exec(): TopicModel = {
+        println(s"UATFM topics: ${$(numTopics)} groups: ${$(numUserGroups)} maxEIterations: ${$(numEIterations)}")
+        new AuthorAwareTFM($(numTopics), $(corpus).words.size, $(numUserGroups), $(numIterations), $(numEIterations))
+      }
+    })
 
   val action: Action[Unit] = Action("action")
     .help("Action to perform.")
@@ -128,18 +128,18 @@ object Driver extends CLIApp {
         val model: TopicModel = $(algorithm).exec()
         model.train($(corpus))
         println("Done.")
-//        val ll1 = model.score
-//        val ll2 = model.logLikelihood(corpus)
-//        println(s" Perplexity: $ll1")
-//        println(s" Left-out likelihood: ${ll2 - ll1}")
-//        import edu.utulsa.util.writeJson
-//        writeJson($(resultsFile), Map(
-//          "score" -> model.score,
-//          "lo-score" -> (ll2 - ll1),
-//          "test-size" -> $(testSize),
-//          "train-num-docs" -> train.size,
-//          "test-num-docs" -> (corpus.size - train.size)
-//        ))
+        val ll1 = model.logLikelihood(train)
+        val ll2 = model.logLikelihood($(corpus))
+        println(s" Perplexity: $ll1")
+        println(s" Left-out likelihood: ${ll2 - ll1}")
+        import edu.utulsa.util.writeJson
+        writeJson($(resultsFile), Map(
+          "score" -> ll1,
+          "lo-score" -> (ll2 - ll1),
+          "test-size" -> $(testSize),
+          "train-num-docs" -> train.size,
+          "test-num-docs" -> ($(corpus).size - train.size)
+        ))
       }
     })
     .add(new Command[Unit] {
@@ -179,24 +179,24 @@ object Driver extends CLIApp {
         val model: TopicModel = $(algorithm).exec()
         model.train(train)
 
-//        val ll1 = model.score
-//        val ll2 = model.logLikelihood(corpus)
-//        val lld10 = model.logLikelihood(d10)
-//        val lld4 = model.logLikelihood(d4)
-//        val lld5 = model.logLikelihood(d5)
-//        import edu.utulsa.util.writeJson
-//        writeJson($(resultsFile), Map(
-//          "depth" -> $(convDepth),
-//          "score" -> model.score,
-//          "lo-score" -> (ll2 - ll1),
-//          "perplexity" -> ((ll2 - ll1) / testSize),
-//          "d10-perplexity" -> ((ll2 - lld10) / d10Size),
-//          "train-size" -> trainSize,
-//          "test-size" -> testSize
-//        ))
-//        println(s" Perplexity: ${(ll2 - ll1) / testSize}")
-//        println(s" Depth 10 perplexity: ${(ll2 - lld10) / d10Size}")
-//        println(s" Depth 5 perplexity: ${(lld5 - lld4) / (d5.size - d4.size)}")
+        val ll1 = model.logLikelihood(train)
+        val ll2 = model.logLikelihood($(corpus))
+        val lld10 = model.logLikelihood(d10)
+        val lld4 = model.logLikelihood(d4)
+        val lld5 = model.logLikelihood(d5)
+        import edu.utulsa.util.writeJson
+        writeJson($(resultsFile), Map(
+          "depth" -> $(convDepth),
+          "score" -> ll1,
+          "lo-score" -> (ll2 - ll1),
+          "perplexity" -> ((ll2 - ll1) / testSize),
+          "d10-perplexity" -> ((ll2 - lld10) / d10Size),
+          "train-size" -> trainSize,
+          "test-size" -> testSize
+        ))
+        println(s" Perplexity: ${(ll2 - ll1) / testSize}")
+        println(s" Depth 10 perplexity: ${(ll2 - lld10) / d10Size}")
+        println(s" Depth 5 perplexity: ${(lld5 - lld4) / (d5.size - d4.size)}")
       }
     })
     .register
