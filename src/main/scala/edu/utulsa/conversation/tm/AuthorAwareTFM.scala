@@ -266,7 +266,7 @@ sealed class UATFMOptimize(val corpus: Corpus, params: UATFMParams) {
       val logQ: Double = dnodes.par.map(node => log((!node.z)(topics(node)))).sum +
         unodes.par.map(node => log((!node.r)(groups(node)))).sum
       val logP: Double = logPZ + logZ
-      2*logP - logQ
+      logP - logQ
     }.seq
     lse(samples) - log(samples.size)
   }

@@ -19,7 +19,7 @@ class MarkovTFM
   override val numTopics: Int,
   val numWords: Int,
   val numIterations: Int
-) extends TopicModel(numTopics) with NTFMParams {
+) extends TopicModel(numTopics) with MTFMParams {
   override val K: Int = numTopics
   override val M: Int = numWords
 
@@ -44,7 +44,7 @@ class MarkovTFM
     csvwrite(new File(dir + "/theta.mat"), theta)
 
     println("Saving document info...")
-    val dTopics: Map[String, List[TPair]] = optim.nodes.zipWithIndex.map { case (node, index) =>
+    val dTopics: Map[String, List[TPair]] = optim.infer.nodes.zipWithIndex.map { case (node, index) =>
       val maxItem = (!node.z).toArray.zipWithIndex
         .maxBy(_._1)
       node.document.id ->
@@ -66,13 +66,17 @@ class MarkovTFM
   }
 
   override def logLikelihood(corpus: Corpus): Double = {
-    val infer = new MTFMOptimizer(corpus, this)
-    infer.eStep()
-    infer.approxLikelihood()
+    if(corpus == optim.corpus) {
+      optim.infer.approxLikelihood()
+    }
+    else {
+      val infer = new MTFMInfer(corpus, this)
+      infer.approxLikelihood()
+    }
   }
 }
 
-sealed trait NTFMParams extends TermContainer {
+sealed trait MTFMParams extends TermContainer {
   val M: Int
   val K: Int
   val pi: DenseVector[Double]
@@ -93,23 +97,27 @@ sealed trait NTFMParams extends TermContainer {
 sealed class MTFMOptimizer
 (
   val corpus: Corpus,
-  val params: NTFMParams
+  val params: MTFMParams
 ) {
   import edu.utulsa.util.math._
   import params._
-  val N: Int = corpus.documents.size
-  val ZERO: Vector = DenseVector.zeros(K)
 
+  val infer = new MTFMInfer(corpus, params)
+  import infer._
+
+  val N: Int = corpus.documents.size
   /** LATENT VARIABLE ESTIMATES **/
-  val q: DenseMatrix[Double]   = DenseMatrix.zeros[Double](K, N) // k x n
+  val q: DenseMatrix[Double] = DenseMatrix.zeros[Double](K, N) // k x n
+
+  val roots: Seq[Int] = trees.map((tree) => tree.root.index)
 
   private val b: CSCMatrix[Double] = {
     val builder = new CSCMatrix.Builder[Double](N, N)
 
     corpus.foreach(document =>
-      if(corpus.replies.contains(document))
+      if (corpus.replies.contains(document))
         corpus.replies(document).foreach(reply =>
-            builder.add(corpus.index(document), corpus.index(reply), 1d)
+          builder.add(corpus.index(document), corpus.index(reply), 1d)
         )
     )
 
@@ -126,32 +134,23 @@ sealed class MTFMOptimizer
     }
 
     builder.result()
-  }   // n x m
+  } // n x m
 
   def fit(numIterations: Int): Unit = {
-//    println(f"init   ${fastApproxLikelihood()}%12.4f ~ ${approxLikelihood(20)}%12.4f")
+    //    println(f"init   ${fastApproxLikelihood()}%12.4f ~ ${approxLikelihood(20)}%12.4f")
     (1 to numIterations).foreach { (interval) =>
       println(s"Iteration $interval")
       eStep()
-//      println(f"e-step ${fastApproxLikelihood()}%12.4f ~ ${approxLikelihood(20)}%12.4f")
+      //      println(f"e-step ${fastApproxLikelihood()}%12.4f ~ ${approxLikelihood(20)}%12.4f")
       mStep()
-//      println(f"m-step ${fastApproxLikelihood()}%12.4f ~ ${approxLikelihood()}%12.4f")
+      //      println(f"m-step ${fastApproxLikelihood()}%12.4f ~ ${approxLikelihood()}%12.4f")
     }
   }
 
-  val (trees, nodes) = build(corpus)
-  val roots: Seq[Int] = trees.map((tree) => tree.root.index)
-  var currentTime = 1
-
   def eStep(): Unit = {
-    trees.par.foreach { case (tree) =>
-      tree.nodes.foreach { node => node.reset() }
+    infer.update()
+    trees.par.foreach { tree =>
       tree.nodes.foreach { node => q(::, node.index) := !node.z }
-//      if(tree.root.depth == tree.root.size) {
-//        val ll1: Double = tree.loglikelihood
-//        val ll2: Double = (!tree.leaves.head.alpha).toArray.sum
-//        println(f"${tree.root.depth} $ll1%.4f $ll2%.4f")
-//      }
     }
   }
 
@@ -164,21 +163,36 @@ sealed class MTFMOptimizer
       },
       () => {
         // A maximization
-        a := normalize((q * b * q.t) :+ (1e-3 / (K*K)), Axis._1, 1.0)
+        a := normalize((q * b * q.t) :+ (1e-3 / K), Axis._1, 1.0)
       },
       () => {
         // Theta maximization
-        theta := normalize((q * c) :+ (1e-3 / (K*M)), Axis._1, 1.0).t
+        theta := normalize((q * c) :+ (1e-3), Axis._1, 1.0).t
       }
     ).par.foreach { case (step) => step() }
 
     reset()
   }
+}
 
-  def build(corpus: Corpus): (Seq[DTree], Seq[DNode]) = {
+class MTFMInfer(val corpus: Corpus, val params: MTFMParams) {
+  import edu.utulsa.util.math._
+  import params._
+
+  val N = corpus.size
+  val ZERO: Vector = DenseVector.zeros(K)
+
+  val (trees, nodes) = {
     val nodes: Seq[DNode] = corpus.extend { case (d, i) => new DNode(d, i) }
     val trees: Seq[DTree] = nodes.filter(_.parent.isEmpty).map(new DTree(_))
     (trees, nodes)
+  }
+
+  def update(): Unit = {
+    trees.par.foreach { case (tree) =>
+      tree.nodes.foreach { node => node.reset() }
+      tree.nodes.foreach { node => node.update() }
+    }
   }
 
   def fastApproxLikelihood(): Double = {
@@ -186,20 +200,21 @@ sealed class MTFMOptimizer
   }
 
   def approxLikelihood(numSamples: Int = 100): Double = {
-    val lls = trees.map(tree => {
-      val samples: Seq[Double] = (1 to numSamples).map(i => {
+    update()
+    val lls = trees.par.map(tree => {
+      val samples: Seq[Double] = (1 to numSamples).par.map(i => {
         // compute likelihood on this sample
         val topics: Map[DNode, Int] = tree.nodes.map(node => node -> sample(!node.topicProbs)).toMap
         val logPZ = tree.nodes.map(node => (!node.probW)(topics(node))).sum
         val logZ = tree.logP(topics)
         val logQ = tree.nodes.map(node => log((!node.z)(topics(node)))).sum
-        if(logPZ.isInfinite || logZ.isInfinite || logQ.isInfinite ) {
+        val logP = logPZ + logZ
+        if(logPZ.isInfinite || logZ.isInfinite || logQ.isInfinite) {
           println(s" error $logPZ $logZ $logQ")
         }
-        val logP = logPZ + logZ
-        2*logP - logQ
-      })
-      lse(samples) - log(samples.size)
+        logP - logQ
+      }).seq
+      lse(samples) - log(numSamples)
     })
     lls.sum
   }

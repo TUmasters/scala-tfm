@@ -34,10 +34,13 @@ trait TermContainer {
   implicit protected val terms: mutable.ListBuffer[Term[_]] = mutable.ListBuffer()
   private var warnEmpty = false
   def reset(): Unit = {
-    if(terms.isEmpty && !warnEmpty) {
-      warnEmpty = true
-      System.err.println("WARNING: Attempted to reset term container with no terms.")
-    }
+//    if(terms.isEmpty && !warnEmpty) {
+//      warnEmpty = true
+//      System.err.println("WARNING: Attempted to reset term container with no terms.")
+//    }
     terms.foreach(_.reset())
+  }
+  def update(): Unit = {
+    terms.foreach(_.update())
   }
 }

@@ -122,16 +122,19 @@ object Driver extends CLIApp {
         val (testDocs: Seq[Document], trainDocs: Seq[Document]) = $(corpus).roots.splitAt($(testSize))
 //        val test = Corpus(testDocs.flatMap(corpus.expand(_)), corpus.words, corpus.authors)
         val train = Corpus(trainDocs.flatMap($(corpus).expand(_)), $(corpus).words, $(corpus).authors)
+        val test = Corpus(testDocs.flatMap($(corpus).expand(_)), $(corpus).words, $(corpus).authors)
         println(s"Training ${$(algorithm).name}...")
 //        val alg: TMAlgorithm = $(algorithm)()
 //        val model: TopicModel = alg.train(train)
         val model: TopicModel = $(algorithm).exec()
-        model.train($(corpus))
+        model.train(train)
         println("Done.")
         val ll1 = model.logLikelihood(train)
-        val ll2 = model.logLikelihood($(corpus))
-        println(s" Perplexity: $ll1")
-        println(s" Left-out likelihood: ${ll2 - ll1}")
+        val ll2 = model.logLikelihood(test)
+        val trainWords = train.wordCount
+        val testWords = $(corpus).wordCount - train.wordCount
+        println(f" Perplexity:          ${ll1 / trainWords}%4.8f")
+        println(f" Left-out likelihood: ${ll2 / testWords}%4.8f")
         import edu.utulsa.util.writeJson
         writeJson($(resultsFile), Map(
           "score" -> ll1,
@@ -194,9 +197,9 @@ object Driver extends CLIApp {
           "train-size" -> trainSize,
           "test-size" -> testSize
         ))
-        println(s" Perplexity: ${(ll2 - ll1) / testSize}")
+        println(s" Perplexity:          ${(ll2 - ll1) / testSize}")
         println(s" Depth 10 perplexity: ${(ll2 - lld10) / d10Size}")
-        println(s" Depth 5 perplexity: ${(lld5 - lld4) / (d5.size - d4.size)}")
+        println(s" Depth 5 perplexity:  ${(lld5 - lld4) / (d5.size - d4.size)}")
       }
     })
     .register

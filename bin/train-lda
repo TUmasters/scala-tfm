@@ -5,10 +5,10 @@ import json
 import numpy as np
 import os, shutil
 from _document import parse_corpus
+import random
+from gensim import corpora
 
-## Process documents
-
-def run_depth_tests(corpus_file, num_topics):
+def load_corpus(corpus_file):
     print('Loading...')
     if not os.path.exists(corpus_file):
         print("Could not find file '{}'.".format(corpus_file))
@@ -23,40 +23,58 @@ def run_depth_tests(corpus_file, num_topics):
     corpus = parse_corpus(data)
 
     print('Vectorizing...')
-    from sklearn.feature_extraction.text import CountVectorizer
-    vectorizer = CountVectorizer()
-    X = vectorizer.fit_transform([str.join(' ', document.words) for document in corpus])
-    n = len(data)
+    d = corpora.Dictionary([doc.words for doc in corpus])
+    X = [d.doc2bow(doc.words) for doc in corpus]
 
-    for depth in range(1, 11):
+    # from sklearn.feature_extraction.text import CountVectorizer
+    # vectorizer = CountVectorizer()
+    # X = vectorizer.fit_transform([str.join(' ', document.words) for document in corpus])
+    # n = len(data)
+    return X
+
+## Process documents
+def run_depth_tests(corpus_file, num_topics):
+    X = load_corpus(corpus_file)
+
+    for depth in range(5, 6):
         idx_d = np.array(
             [index for index, document in enumerate(corpus) if document.level <= depth]
         )
-        X_d = X[idx_d, :]
-        print("depth {}".format(depth))
+        # X_d = X[idx_d, :]
+        X_d = [X[i] for i in idx_d]
+        # print("depth {}".format(depth))
         run_lda(X, X_d, num_topics)
 
-def run_lda(X, X_d, num_topics):
-    from sklearn.decomposition import LatentDirichletAllocation
+def run_lda(X_train, X_test, num_topics):
+    # from sklearn.decomposition import LatentDirichletAllocation
+    from gensim.models.ldamulticore import LdaMulticore
 
-    train_size = X_d.shape[0]
-    test_size = X.shape[0] - X_d.shape[0]
+    train_size = len(X_train)
+    test_size = len(X_test)
 
+    print("num topics: {:6d}".format(num_topics))
     print(" train: {:6d} test: {:6d}".format(train_size, test_size))
 
-    lda = LatentDirichletAllocation(n_components=num_topics)
-    lda.fit(X_d)
-    ll1 = lda.score(X_d)
-    ll2 = lda.score(X)
+    lda = LdaMulticore(X_train, num_topics=num_topics)
+    # lda.fit(X_d)
+    # ll1 = lda.score(X_d)
+    # ll2 = lda.score(X)
+    ll1 = lda.log_perplexity(X_train)
+    ll2 = lda.log_perplexity(X_test)
 
     print(" Score:           {}".format(ll1))
-    print(" Test perplexity: {}".format((ll2-ll1) / test_size))
+    print(" Test perplexity: {}".format(ll2))
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Trains LDA on textual data.')
     parser.add_argument('corpus_file', type=str, metavar='D', help='file with documents.')
-    parser.add_argument('--num-topics', type=int, help='number of documents to train on.', default=25)
+    # parser.add_argument('--num-topics', type=int, help='number of documents to train on.', default=25)
 
     args = parser.parse_args()
-    run_depth_tests(args.corpus_file, args.num_topics)
+    X = load_corpus(args.corpus_file)
+    # random.shuffle(X)
+    test_size = 1000
+    (X_test, X_train) = (X[:test_size], X[test_size:])
+    for num_topics in [1, 2, 3, 4, 5, 10, 20, 50, 100, 200, 500]:
+        run_lda(X_train, X_test, num_topics)

@@ -37,8 +37,8 @@ class Corpus private (
   val path: File = null
 ) extends Iterable[Document] {
   lazy val index: Map[Document, Int] = documents.zipWithIndex.toMap
-
   lazy val roots: Seq[Document] = documents.filter(_.parentId == null)
+  lazy val wordCount: Int = documents.flatMap(_.count.map(_._2)).sum
 
   override def size: Int = documents.size
   override def iterator: Iterator[Document] = documents.iterator
