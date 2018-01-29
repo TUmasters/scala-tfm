@@ -73,7 +73,7 @@ object Driver extends CLIApp {
 
       override def exec(): TopicModel = {
         println(s"UATFM topics: ${$(numTopics)} groups: ${$(numUserGroups)} maxEIterations: ${$(numEIterations)}")
-        new AuthorAwareTFM($(numTopics), $(corpus).words.size, $(numUserGroups), $(numIterations), $(numEIterations))
+        new ConversationAwareTFM($(numTopics), $(corpus).words.size, $(numUserGroups), $(numIterations), $(numEIterations))
       }
     })
 
@@ -152,9 +152,14 @@ object Driver extends CLIApp {
       algorithm.register
       corpus.register
 
-      val convDepth: Param[Int] = Param("depth")
+      val startDepth: Param[Int] = Param("start-depth")
         .help("Depth of conversations to use for training set.")
         .default(2)
+        .register
+
+      val endDepth: Param[Int] = Param("end-depth")
+        .help("Depth to stop testing at.")
+        .default(10)
         .register
 
       val resultsFile: Param[File] = Param("results-file")
@@ -167,39 +172,38 @@ object Driver extends CLIApp {
         Corpus(docs, corpus.words, corpus.authors)
       }
       override def exec(): Unit = {
-        println(s"Evaluating on conversations of depth ${$(convDepth)}.")
-        println("Loading corpus...")
-        val train: Corpus = split($(corpus), $(convDepth))
-        val d10: Corpus = split($(corpus), 10)
-        val d4: Corpus = split($(corpus), 4)
-        val d5: Corpus = split($(corpus), 5)
-        val trainSize: Int = train.size
-        val testSize: Int = $(corpus).size - train.size
-        val d10Size: Int = $(corpus).size - d10.size
+        println(s"Evaluating on conversations of depth ${$(startDepth)}-${$(endDepth)}.")
+        println(s"Training ${$(algorithm).name} on ${$(corpus).roots.size} conversations")
 
-        println(s"Training ${$(algorithm).name}")
-        println(s" Train size: $trainSize Test size: $testSize")
-        val model: TopicModel = $(algorithm).exec()
-        model.train(train)
+        val depthInfo = ($(startDepth) to $(endDepth)).map { case depth =>
+          val train: Corpus = split($(corpus), depth)
+          val trainSize: Int = train.size
+          val testSize: Int = $(corpus).size - train.size
 
-        val ll1 = model.logLikelihood(train)
-        val ll2 = model.logLikelihood($(corpus))
-        val lld10 = model.logLikelihood(d10)
-        val lld4 = model.logLikelihood(d4)
-        val lld5 = model.logLikelihood(d5)
+          println(f"Depth: $depth%2d Train size: $trainSize%6d Test size: $testSize%6d")
+          val trainWords = train.documents.flatMap(_.count.map(_._2)).sum
+          val testWords = $(corpus).documents.flatMap(_.count.map(_._2)).sum - trainWords
+
+          val model: TopicModel = $(algorithm).exec()
+          model.train(train)
+
+          val ll1 = model.logLikelihood(train)
+          val ll2 = model.logLikelihood($(corpus))
+          println(f" Train perplexity:    ${ll1 / trainWords}%6.4f")
+          println(f" Left-out perplexity: ${(ll2 - ll1) / testWords}%6.4f")
+          Map(
+            "depth" -> depth,
+            "train-words" -> trainWords,
+            "train-size" -> trainSize,
+            "test-words" -> testWords,
+            "test-size" -> testSize,
+            "train-perplexity" -> (ll1 / trainWords),
+            "test-perplexity" -> ((ll2 - ll1) / testWords)
+          )
+        }
+
         import edu.utulsa.util.writeJson
-        writeJson($(resultsFile), Map(
-          "depth" -> $(convDepth),
-          "score" -> ll1,
-          "lo-score" -> (ll2 - ll1),
-          "perplexity" -> ((ll2 - ll1) / testSize),
-          "d10-perplexity" -> ((ll2 - lld10) / d10Size),
-          "train-size" -> trainSize,
-          "test-size" -> testSize
-        ))
-        println(s" Perplexity:          ${(ll2 - ll1) / testSize}")
-        println(s" Depth 10 perplexity: ${(ll2 - lld10) / d10Size}")
-        println(s" Depth 5 perplexity:  ${(lld5 - lld4) / (d5.size - d4.size)}")
+        writeJson($(resultsFile), depthInfo)
       }
     })
     .register

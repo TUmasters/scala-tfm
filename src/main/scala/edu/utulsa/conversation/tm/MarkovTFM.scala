@@ -139,7 +139,7 @@ sealed class MTFMOptimizer
   def fit(numIterations: Int): Unit = {
     //    println(f"init   ${fastApproxLikelihood()}%12.4f ~ ${approxLikelihood(20)}%12.4f")
     (1 to numIterations).foreach { (interval) =>
-      println(s"Iteration $interval")
+//      println(s"Iteration $interval")
       eStep()
       //      println(f"e-step ${fastApproxLikelihood()}%12.4f ~ ${approxLikelihood(20)}%12.4f")
       mStep()

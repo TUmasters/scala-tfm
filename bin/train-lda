@@ -30,20 +30,19 @@ def load_corpus(corpus_file):
     # vectorizer = CountVectorizer()
     # X = vectorizer.fit_transform([str.join(' ', document.words) for document in corpus])
     # n = len(data)
-    return X
+    return corpus, X
 
 ## Process documents
 def run_depth_tests(corpus_file, num_topics):
-    X = load_corpus(corpus_file)
+    corpus, X = load_corpus(corpus_file)
 
-    for depth in range(5, 6):
-        idx_d = np.array(
-            [index for index, document in enumerate(corpus) if document.level <= depth]
-        )
+    for depth in range(2, 11):
+        idx_d = set([index for index, document in enumerate(corpus) if document.level <= depth])
         # X_d = X[idx_d, :]
-        X_d = [X[i] for i in idx_d]
+        X_test = [X[i] for i in range(len(corpus)) if not i in idx_d]
+        X_train = [X[i] for i in idx_d]
         # print("depth {}".format(depth))
-        run_lda(X, X_d, num_topics)
+        run_lda(X_train, X_test, num_topics)
 
 def run_lda(X_train, X_test, num_topics):
     # from sklearn.decomposition import LatentDirichletAllocation
@@ -69,12 +68,13 @@ def run_lda(X_train, X_test, num_topics):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Trains LDA on textual data.')
     parser.add_argument('corpus_file', type=str, metavar='D', help='file with documents.')
-    # parser.add_argument('--num-topics', type=int, help='number of documents to train on.', default=25)
+    parser.add_argument('--num-topics', type=int, help='number of documents to train on.', default=25)
 
     args = parser.parse_args()
     X = load_corpus(args.corpus_file)
+    run_depth_tests(args.corpus_file, args.num_topics)
     # random.shuffle(X)
-    test_size = 1000
-    (X_test, X_train) = (X[:test_size], X[test_size:])
-    for num_topics in [1, 2, 3, 4, 5, 10, 20, 50, 100, 200, 500]:
-        run_lda(X_train, X_test, num_topics)
+    # test_size = 1000
+    # (X_test, X_train) = (X[:test_size], X[test_size:])
+    # for num_topics in [1, 2, 3, 4, 5, 10, 20, 50, 100, 200, 500]:
+    #     run_lda(X_train, X_test, num_topics)

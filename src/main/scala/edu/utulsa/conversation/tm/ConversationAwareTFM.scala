@@ -8,14 +8,7 @@ import edu.utulsa.conversation.text.{Corpus, Dictionary, Document, DocumentNode}
 import edu.utulsa.util.{Term, TermContainer}
 import edu.utulsa.util.math._
 
-/**
-  * UATFMOptimizer: Trains the parameters for a UATFM model on some corpus.
-  * @param numTopics Number of topics to use.
-  * @param numUserGroups Number of user groups to use.
-  * @param numIterations Number of iterations to run for.
-  * @param maxEIterations Maximum number of iterations to run for.
-  */
-class AuthorAwareTFM
+class ConversationAwareTFM
 (
   override val numTopics: Int,
   val numWords: Int,
@@ -88,7 +81,7 @@ class AuthorAwareTFM
   }
 }
 
-trait UATFMParams extends TermContainer {
+trait CATFMParams extends TermContainer {
   val M: Int
   val K: Int
   val G: Int
@@ -125,12 +118,12 @@ trait UATFMParams extends TermContainer {
 }
 
 
-sealed class UATFMOptimize(val corpus: Corpus, params: CATFMParams) {
+sealed class CATFMOptimize(val corpus: Corpus, params: CATFMParams) {
   import params._
   import edu.utulsa.util.math._
 
   val N: Int = corpus.size
-  val U: Int = corpus.roots.size
+  val U: Int = corpus.authors.size
   val ZERO: Vector = DenseVector.zeros(K)
 
   val (trees, dnodes, unodes) = build(corpus)
@@ -178,7 +171,7 @@ sealed class UATFMOptimize(val corpus: Corpus, params: CATFMParams) {
 
   def fit(numIterations: Int, maxEIterations: Int): Unit = {
     (1 to numIterations).foreach { (interval) =>
-      println(f"iteration $interval%4d")
+//      println(f"iteration $interval%4d")
       eStep(maxEIterations)
 //      println(f"$interval%4d e-step ${approxLikelihood()}%12.4f")
       mStep()
@@ -237,10 +230,10 @@ sealed class UATFMOptimize(val corpus: Corpus, params: CATFMParams) {
 
   def build(corpus: Corpus): (Seq[DTree], Seq[DNode], Seq[UNode]) = {
     val dnodes: Seq[DNode] = corpus.extend(new DNode(_, _))
-    val authorship: Map[Int, Seq[DNode]] = dnodes.groupBy(_.document.author)
-    val unodes: Seq[UNode] = corpus.authors
-      .filter(authorship contains)
-      .map(author => new UNode(author, authorship(author))).toSeq
+    val convs: Map[DNode, Seq[DNode]] = dnodes.groupBy(_.root)
+    val unodes: Seq[UNode] = convs.zipWithIndex.map { case ((root, docs), id) =>
+      new UNode(id, docs)
+    }.toSeq
     unodes.foreach { node =>
       for(dnode <- node.documents)
         dnode.author = node
@@ -332,6 +325,11 @@ sealed class UATFMOptimize(val corpus: Corpus, params: CATFMParams) {
     extends DocumentNode[DNode](document, index) with TermContainer {
 
     var author: UNode = _
+
+    def root: DNode = parent match {
+      case Some(p) => p.root
+      case None => this
+    }
 
     /**
       * Computes log probabilities for observing a set of words for each latent
