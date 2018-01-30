@@ -76,6 +76,18 @@ object Driver extends CLIApp {
         new ConversationAwareTFM($(numTopics), $(corpus).words.size, $(numUserGroups), $(numIterations), $(numEIterations))
       }
     })
+    .add(new Command[TopicModel] {
+      override val name: String = "utm"
+      override val help: String = "Mixture of Unigrams (non-Bayesian)"
+
+      numTopics.register
+      numIterations.register
+
+      override def exec(): TopicModel = {
+        new UnigramTM($(numTopics), $(corpus).words.size, $(numIterations))
+      }
+    })
+
 
   val action: Action[Unit] = Action("action")
     .help("Action to perform.")
@@ -135,14 +147,14 @@ object Driver extends CLIApp {
         val testWords = $(corpus).wordCount - train.wordCount
         println(f" Perplexity:          ${ll1 / trainWords}%4.8f")
         println(f" Left-out likelihood: ${ll2 / testWords}%4.8f")
-        import edu.utulsa.util.writeJson
-        writeJson($(resultsFile), Map(
-          "score" -> ll1,
-          "lo-score" -> (ll2 - ll1),
-          "test-size" -> $(testSize),
-          "train-num-docs" -> train.size,
-          "test-num-docs" -> ($(corpus).size - train.size)
-        ))
+//        import edu.utulsa.util.writeJson
+//        writeJson($(resultsFile), Map(
+//          "score" -> ll1,
+//          "lo-score" -> (ll2 - ll1),
+//          "test-size" -> $(testSize),
+//          "train-num-docs" -> train.size,
+//          "test-num-docs" -> ($(corpus).size - train.size)
+//        ))
       }
     })
     .add(new Command[Unit] {

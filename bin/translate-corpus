@@ -1,0 +1,76 @@
+#!/usr/bin/env python3
+
+################################################################
+##
+## Builds a new corpus that can be used by BTM (Biterm Topic
+## Model)
+##
+################################################################
+
+import argparse
+import json
+import os
+from _document import parse_corpus
+
+
+def create_vocab(corpus):
+    w2id = {}
+    d2ids = {}
+    for doc in corpus:
+        for word in doc.words:
+            if not word in w2id:
+                w2id[word] = len(w2id)
+    for doc in corpus:
+        d2ids[doc] = [str(w2id[word]) for word in doc.words]
+    return w2id, d2ids
+
+
+def split_depth(corpus, depth):
+    train_corpus = [doc for doc in corpus if doc.level <= depth]
+    test_corpus = [doc for doc in corpus if doc.level > depth]
+    return train_corpus, test_corpus
+
+
+def load_corpus(corpus_file):
+    print('Loading...')
+    if not os.path.exists(corpus_file):
+        print("Could not find file '{}'.".format(corpus_file))
+        return
+    with open(corpus_file, 'r') as f:
+        data = json.load(f)
+
+    for item in data:
+        item['reply_to'] = item['parent']
+        item['parent'] = None
+
+    corpus = parse_corpus(data)
+    return corpus
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Translates corpus into format that can be used by the Biterm Topic Model.')
+    parser.add_argument('corpus_file', type=str, metavar='D', help='file with documents.')
+    args = parser.parse_args()
+
+    corpus = load_corpus(args.corpus_file)
+    corpus_dir = os.path.dirname(args.corpus_file)
+    depth_dir = corpus_dir + '/btm'
+
+    if not os.path.exists(depth_dir):
+        os.makedirs(depth_dir)
+
+    w2id, d2ids = create_vocab(corpus)
+    with open(depth_dir + '/vocab.txt', 'w') as f:
+        for w, w_id in w2id.items():
+            f.write('{}\t{}\n'.format(w_id, w))
+
+    for depth in range(2, 11):
+        print("depth", depth)
+        train, test = split_depth(corpus, depth)
+        with open(depth_dir + '/depth{:02d}_train.txt'.format(depth), 'w') as f:
+            for doc in train:
+                f.write(' '.join(d2ids[doc]) + '\n')
+        with open(depth_dir + '/depth{:02d}_test.txt'.format(depth), 'w') as f:
+            for doc in test:
+                f.write(' '.join(d2ids[doc]) + '\n')
+    print("Done.")
