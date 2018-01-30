@@ -200,13 +200,23 @@ class MTFMInfer(val corpus: Corpus, val params: MTFMParams) {
       tree.nodes.foreach { node => node.reset() }
       tree.nodes.foreach { node => node.update() }
     }
-    val dist = nodes.map { n =>
-      n.parent match {
-        case Some(p) => norm(a.t * (!p.z) - !n.z)
-        case None => norm(pi - !n.z)
-      }
-    }.sum / nodes.size
-    println(dist)
+//    val dist = nodes.map { n =>
+//      n.parent match {
+//        case Some(p) => norm(a.t * (!p.z) - !n.eDist)
+//        case None => norm(pi - !n.eDist)
+//      }
+//    }.sum / nodes.size
+//    val p2 = nodes.map { n =>
+//      n.parent match {
+//        case Some(p) => log((!p.z).t * a * (!n.z))
+//        case None => lse((!logPi) + !n.logZ)
+//      }
+//    }.sum / nodes.size
+//    val p1 = nodes.map { n =>
+//      lse((!n.logPw) + (!n.logZ))
+//    }.sum / corpus.wordCount
+////    println(dist)
+//    println(f"$p1%6.4f + $p2%6.4f")
   }
 
   def approxLikelihood(numSamples: Int = 100): Double = {
@@ -244,6 +254,8 @@ class MTFMInfer(val corpus: Corpus, val params: MTFMParams) {
         (!logTheta)(word, ::).t * count.toDouble
       }.fold(ZERO)(_ + _)
     }
+
+    val eDist: Term[Vector] = Term { exp((!logPw) - lse(!logPw)) }
 
     val lambda: Term[DenseVector[Double]] = Term {
       // Lambda messages regarding likelihood of observing the document

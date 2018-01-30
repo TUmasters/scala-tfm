@@ -218,6 +218,64 @@ object Driver extends CLIApp {
         writeJson($(resultsFile), depthInfo)
       }
     })
+    .add(new Command[Unit] {
+      override def name = "evaluate-topics"
+      override def help = "Evaluate the topic model with various topic configurations."
+
+      corpus.register
+
+      val startTopics: Param[Int] = Param("start-topics")
+        .help("Depth of conversations to use for training set.")
+        .default(3)
+        .register
+
+      val endTopics: Param[Int] = Param("end-topics")
+        .help("Depth to stop testing at.")
+        .default(30)
+        .register
+
+      val testSize: Param[Int] = Param("test-size")
+        .help("Number of conversations to use in the test set.")
+        .default(1000)
+        .register
+
+      def split(corpus: Corpus, depth: Int): Corpus = {
+        val docs: Seq[Document] = corpus.roots.flatMap(corpus.expand(_, depth = depth))
+        Corpus(docs, corpus.words, corpus.authors)
+      }
+      override def exec(): Unit = {
+        println(s"Evaluating on topics in ${$(startTopics)} - ${$(endTopics)}.")
+        println(s"Training UTM on ${$(corpus).roots.size} conversations")
+
+        val (testDocs: Seq[Document], trainDocs: Seq[Document]) = $(corpus).roots.splitAt($(testSize))
+        val train = Corpus(trainDocs.flatMap($(corpus).expand(_)), $(corpus).words, $(corpus).authors)
+        val test = Corpus(testDocs.flatMap($(corpus).expand(_)), $(corpus).words, $(corpus).authors)
+        val trainWords = train.wordCount
+        val testWords = test.wordCount
+
+        println(f"Train size: ${train.size}%6d Test size: ${test.size}%6d")
+        val topicInfo = ($(startTopics) to $(endTopics)).map { case topics =>
+
+          println(f"Topics: $topics%3d")
+
+          val model: TopicModel = new UnigramTM(topics, $(corpus).words.size, 30)
+          model.train(train)
+
+          val ll1 = model.logLikelihood(train)
+          val ll2 = model.logLikelihood($(corpus))
+          println(f" Train perplexity:    ${ll1 / trainWords}%6.4f")
+          println(f" Left-out perplexity: ${(ll2 - ll1) / testWords}%6.4f")
+          Map(
+            "num-topics" -> topics,
+            "train-perplexity" -> (ll1 / trainWords),
+            "test-perplexity" -> ((ll2 - ll1) / testWords)
+          )
+        }
+
+//        import edu.utulsa.util.writeJson
+//        writeJson($(resultsFile), depthInfo)
+      }
+    })
     .register
 
   $.parse()

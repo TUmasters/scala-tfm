@@ -1,7 +1,7 @@
 package edu.utulsa.conversation.tm
 import java.io.File
 
-import breeze.linalg.{Axis, DenseMatrix, DenseVector, norm, normalize}
+import breeze.linalg.{Axis, CSCMatrix, DenseMatrix, DenseVector, norm, normalize}
 import breeze.numerics.{exp, log}
 import edu.utulsa.conversation.text.{Corpus, Document, DocumentNode}
 import edu.utulsa.util.{Term, TermContainer}
@@ -15,7 +15,7 @@ class UnigramTM
 
   /** PARAMETERS **/
   val pi: Vector = DenseVector.rand(numTopics)
-  val theta: Matrix = normalize(DenseMatrix.rand(numWords, numTopics), Axis._1, 0)
+  val theta: Matrix = normalize(DenseMatrix.rand(numWords, numTopics), Axis._0, 1.0)
 
   var optim: UTMOptimizer = _
 
@@ -79,13 +79,62 @@ sealed class UTMInfer(val corpus: Corpus, val params: UTMParams) {
 
   def likelihood: Double = {
     inferUpdate()
-    nodes.map(node => lse(!node.logPw + !node.logQ)).sum
+    nodes.map(node => lse(!node.logPw + !logPi)).sum
+  }
+
+  def approxLikelihood(numSamples: Int = 100): Double = {
+    update()
+    val lls = nodes.par.map(node => {
+      val samples: Seq[Double] = (1 to numSamples).par.map(i => {
+        // compute likelihood on this sample
+        val topic = sample((!node.q).toArray.zipWithIndex.map(x => x._2 -> x._1).toMap)
+        val logPZ = (!node.logPw)(topic)
+        val logZ = (!logPi)(topic)
+        val logQ = (!node.logQ)(topic)
+        val logP = logPZ + logZ
+//        if(logPZ.isInfinite || logZ.isInfinite || logQ.isInfinite) {
+//          println(s" error $logPZ $logZ $logQ")
+//        }
+        logP - logQ
+      }).seq
+      lse(samples) - log(numSamples)
+    })
+    lls.sum
+  }
+
+  private val b: CSCMatrix[Double] = {
+    val builder = new CSCMatrix.Builder[Double](corpus.size, corpus.size)
+
+    corpus.foreach(document =>
+      if (corpus.replies.contains(document))
+        corpus.replies(document).foreach(reply =>
+          builder.add(corpus.index(document), corpus.index(reply), 1d)
+        )
+    )
+
+    builder.result()
   }
 
   def inferUpdate(): Unit = {
-    nodes.par.foreach { n => n.reset(); n.update() }
-    val dist = nodes.map(n => norm(pi - !n.q)).sum / nodes.size
-    println(dist)
+//    val q: DenseMatrix[Double] = DenseMatrix.zeros[Double](numTopics, corpus.size) // k x n
+    nodes.par.foreach { n =>
+      n.reset()
+      n.update()
+//      q(::, n.index) := !n.q
+    }
+//    val dist = nodes.map(n => norm(pi - !n.eDist)).sum / nodes.size
+//    val a = normalize((q * b * q.t) + 1e-3, Axis._0, 1.0)
+//    val p1 = nodes.map(n => lse((!n.logPw) + (!n.logQ))).sum / corpus.wordCount
+//    val p2 = nodes.map { n =>
+//      n.parent match {
+//        case Some(p) => log((!p.q).t * a * (!n.q))
+//        case None => lse((!logPi) + !n.logQ)
+//      }
+//    }.sum / nodes.size
+//    val p3 = nodes.map(n => lse((!logPi) + !n.logQ)).sum / nodes.size
+//
+////    println(dist)
+//    println(f"$p1%6.4f + $p2%6.4f ~ $p3%6.4f")
   }
   val nodes: Seq[DNode] = corpus.extend(new DNode(_, _))
 
@@ -99,6 +148,8 @@ sealed class UTMInfer(val corpus: Corpus, val params: UTMParams) {
         (!logTheta)(word, ::).t * count.toDouble
       }.fold(ZERO)(_ + _)
     }
+
+    val eDist: Term[Vector] = Term { exp((!logPw) - lse(!logPw)) }
 
     /**
       * Latent topic distribution.
