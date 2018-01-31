@@ -163,11 +163,11 @@ sealed class MTFMOptimizer
       },
       () => {
         // A maximization
-        a := normalize((q * b * q.t) + 1e-3, Axis._0, 1.0)
+        a := normalize((q * b * q.t) + (1.0 / K), Axis._0, 1.0)
       },
       () => {
         // Theta maximization
-        theta := DenseMatrix.ones[Double](M, K) * 1e-3
+        theta := DenseMatrix.ones[Double](M, K) * 0.1
         nodes.par.foreach { node =>
           node.document.count.foreach { case (word, count) =>
             theta(word, ::) :+= (!node.z).t * count.toDouble

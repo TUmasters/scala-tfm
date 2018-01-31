@@ -65,7 +65,7 @@ class ConversationAwareTFM
       optim.corpus.words(w) ->
         theta(w, ::).t.toArray.zipWithIndex.map { case (p, i) => TPair(p, i) }.sortBy(-_.p).toList
     ).toMap
-    writeJson(new File(dir + "word-topics.json"), wTopics)
+    writeJson(new File(dir + "/word-topics.json"), wTopics)
   }
 
   override def train(corpus: Corpus): Unit = {
@@ -207,21 +207,28 @@ sealed class CATFMOptimize(val corpus: Corpus, params: CATFMParams) {
       () => {
         // Pi Maximization
         pi.zipWithIndex.foreach { case (pi_g, g) =>
-          pi_g := normalize(roots.map((index) => qr(g)(::, index)).reduce(_ + _) :+ (1e-3/K), 1.0)
+          pi_g := normalize(roots.map((index) => qr(g)(::, index)).reduce(_ + _) + 1e-3, 1.0)
         }
       },
       () => {
-        phi := normalize(unodes.map(n => !n.r).reduce(_ + _) :+ (1e-3/G), 1.0)
+        phi := normalize(unodes.map(n => !n.r).reduce(_ + _) + 1e-3, 1.0)
       },
       () => {
         // A maximization
         a.zipWithIndex.foreach { case (a_g, g) =>
-          a_g := normalize(q * b * qr(g).t :+ 1e-3, Axis._1, 1.0)
+          a_g := normalize(q * b * qr(g).t + (1.0 / K), Axis._1, 1.0)
         }
       },
       () => {
         // Theta maximization
-        theta := normalize((q * c) :+ 1e-3, Axis._1, 1.0).t
+        theta := DenseMatrix.ones[Double](M, K) * 0.1
+        dnodes.par.foreach { node =>
+          node.document.count.foreach { case (word, count) =>
+            theta(word, ::) :+= (!node.z).t * count.toDouble
+          }
+        }
+        theta := normalize(theta, Axis._0, 1.0)
+//        theta := normalize((q * c) + 0.1, Axis._1, 1.0).t
       }
     ).par.foreach { case (step) => step() }
 

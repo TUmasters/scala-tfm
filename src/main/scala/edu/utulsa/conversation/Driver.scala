@@ -55,24 +55,23 @@ object Driver extends CLIApp {
       override def exec(): TopicModel = new MarkovTFM($(numTopics), $(corpus).words.size, $(numIterations))
     })
     .add(new Command[TopicModel] {
-      override val name: String = "uatfm"
-      override val help: String = "User-Aware Topic Flow Model"
+      override val name: String = "catfm"
+      override val help: String = "Conversation-Aware Topic Flow Model"
 
       numTopics.register
-      val numUserGroups: Param[Int] = Param("num-user-groups")
-        .help("Number of user groups for the UATFM.")
-        .default(10)
+      val numUserGroups: Param[Int] = Param("num-conversation-groups")
+        .help("Number of user groups for the CATFM.")
+        .default(3)
         .validation(validators.INT_GEQ(1))
         .register
       numIterations.register
       val numEIterations: Param[Int] = Param("num-e-iterations")
-        .help("Number of iterations to run the variational inference step of the UATFM.")
-        .default(10)
+        .help("Number of iterations to run the variational inference step of the CATFM.")
+        .default(20)
         .validation(validators.INT_GEQ(1))
         .register
 
       override def exec(): TopicModel = {
-        println(s"UATFM topics: ${$(numTopics)} groups: ${$(numUserGroups)} maxEIterations: ${$(numEIterations)}")
         new ConversationAwareTFM($(numTopics), $(corpus).words.size, $(numUserGroups), $(numIterations), $(numEIterations))
       }
     })
@@ -226,12 +225,12 @@ object Driver extends CLIApp {
 
       val startTopics: Param[Int] = Param("start-topics")
         .help("Depth of conversations to use for training set.")
-        .default(3)
+        .default(8)
         .register
 
       val endTopics: Param[Int] = Param("end-topics")
         .help("Depth to stop testing at.")
-        .default(30)
+        .default(50)
         .register
 
       val testSize: Param[Int] = Param("test-size")
@@ -245,7 +244,7 @@ object Driver extends CLIApp {
       }
       override def exec(): Unit = {
         println(s"Evaluating on topics in ${$(startTopics)} - ${$(endTopics)}.")
-        println(s"Training UTM on ${$(corpus).roots.size} conversations")
+        println(s"Training CATFM on ${$(corpus).roots.size} conversations")
 
         val (testDocs: Seq[Document], trainDocs: Seq[Document]) = $(corpus).roots.splitAt($(testSize))
         val train = Corpus(trainDocs.flatMap($(corpus).expand(_)), $(corpus).words, $(corpus).authors)
@@ -254,11 +253,13 @@ object Driver extends CLIApp {
         val testWords = test.wordCount
 
         println(f"Train size: ${train.size}%6d Test size: ${test.size}%6d")
-        val topicInfo = ($(startTopics) to $(endTopics)).map { case topics =>
+        val topicInfo = Range($(startTopics), $(endTopics), 2).map { topics =>
 
           println(f"Topics: $topics%3d")
 
-          val model: TopicModel = new UnigramTM(topics, $(corpus).words.size, 30)
+//          val model: TopicModel = new ConversationAwareTFM(topics, $(corpus).words.size, 3, 30, 20)
+          val model: TopicModel = new MarkovTFM(topics, $(corpus).words.size, 30)
+//          val model: TopicModel = new UnigramTM(topics, $(corpus).words.size, 10)
           model.train(train)
 
           val ll1 = model.logLikelihood(train)

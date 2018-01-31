@@ -1,8 +1,8 @@
 package edu.utulsa.conversation.tm
 import java.io.File
 
-import breeze.linalg.{Axis, CSCMatrix, DenseMatrix, DenseVector, norm, normalize}
-import breeze.numerics.{exp, log}
+import breeze.linalg._
+import breeze.numerics._
 import edu.utulsa.conversation.text.{Corpus, Document, DocumentNode}
 import edu.utulsa.util.{Term, TermContainer}
 
@@ -19,7 +19,31 @@ class UnigramTM
 
   var optim: UTMOptimizer = _
 
-  override protected def saveModel(dir: File): Unit = ???
+  override protected def saveModel(dir: File): Unit = {
+    require(optim != null, "Model must be trained before it can be saved.")
+
+    import edu.utulsa.util.math.csvwritevec
+    dir.mkdirs()
+    println("Saving parameters...")
+    csvwritevec(new File(dir + "/pi.mat"), pi)
+    csvwrite(new File(dir + "/theta.mat"), theta)
+
+    println("Saving document info...")
+    val dTopics: Map[String, List[TPair]] = optim.infer.nodes.zipWithIndex.map { case (node, index) =>
+      val maxItem = (!node.q).toArray.zipWithIndex
+        .maxBy(_._1)
+      node.document.id ->
+        List(TPair(maxItem._1, maxItem._2))
+    }.toMap
+    writeJson(new File(dir + "/document-topics.json"), dTopics)
+
+    println("Saving word info...")
+    val wTopics: Map[String, List[TPair]] = (0 until numWords).map { case w: Int =>
+      optim.corpus.words(w) ->
+        theta(w, ::).t.toArray.zipWithIndex.map { case (p, i) => TPair(p, i) }.sortBy(-_.p).toList
+    }.toMap
+    writeJson(new File(dir + "/word-topics.json"), wTopics)
+  }
   override def train(corpus: Corpus): Unit = {
     optim = new UTMOptimizer(corpus, this)
     for(iter <- 1 to numIterations) {
