@@ -3,6 +3,7 @@
 ## CLI
 
 import os, sys, argparse
+import itertools
 
 parser = argparse.ArgumentParser(description='Parses a series of text documents into a better format.')
 parser.add_argument('data_file', type=str, metavar='D', help='file with documents.')
@@ -14,6 +15,7 @@ data_path = os.path.dirname(args.data_file)
 
 input_file = args.data_file
 output_file = data_path + "/documents.json"
+stem_file = data_path + "/stem.json"
 
 ## Construct conversation tree
 
@@ -77,8 +79,8 @@ en_stopwords = stopwords.words('english')
 valid_tags = set(['VBD', 'VBP', 'NNS', 'NN', 'RP', 'VBZ', 'NNP', 'RB', 'JJR',
                   'VBN', 'VB', 'VBG', 'JJ', 'FW'])
 invalid_words = set(
-    ["'s", "'m", "n't", "'re", "(", ")", "[", "]", "’", "%", "''", "``", "“", "”"
-         "wa", "ha", "get", "go", "make", "want", "think", "say", "doe"])
+    ["'s", "'m", "n't", "'re", "'ve", "(", ")", "[", "]", "’", "%", "''", "``", "“", "”",
+         "wa", "ha", "get", "go", "make", "want", "think", "say", "doe", '<', '..'])
 
 def check_tags():
     ## used to determine which tags to keep
@@ -94,23 +96,38 @@ def check_tags():
         print("'{}': {}".format(tag, words))
 
 
+stem_map = {}
+stem_count = {}
+def add_stem(word):
+    if not word in stem_map:
+        stem = stemmer.stem(word)
+        stem_map[word] = stem
+        if not stem in stem_count:
+            stem_count[stem] = {}
+        stem_count[stem][word] = 0
+    stem_count[stem_map[word]][word] += 1
+
+
 print("Stemming and filtering stopwords...")
 for document in corpus:
     data = corpus_data[document]
     # print(document.filtered_content)
-    data['filtered'] = [[(stemmer.stem(word), tag) for (word, tag) in sent]
-                        for sent in data['tags']]
     data['filtered'] = [[(word, tag) for (word, tag) in sent if not word in en_stopwords]
+                        for sent in data['tags']]
+    for word in [word for sent in data['filtered'] for (word, _) in sent]:
+        add_stem(word)
+    data['filtered'] = [[(stem_map[word], tag) for (word, tag) in sent]
                         for sent in data['filtered']]
     data['filtered'] = [[word for (word, tag) in sent if tag in valid_tags and
                                                          word not in invalid_words]
                         for sent in data['filtered']]
     data['filtered'] = [word for sent in data['filtered'] for word in sent]
+    # if any([w in data['filtered'] for w in invalid_words]) or 'wa' in data['filtered']:
+    #     print(invalid_words)
+    #     print(data['filtered'])
     # print(data['tags'])
     # print(data['filtered'])
 
-
-import itertools
 
 # words = set(itertools.chain(*[data['filtered'] for data in corpus_data.values()]))
 
@@ -147,5 +164,10 @@ print("{:8d} words".format(len(accept_words)))
 print("Writing to file...")
 with open(output_file, 'w') as f:
     f.write(json.dumps(results, indent=1))
+
+with open(stem_file, 'w') as f:
+    stems = { stem : max(words.items(), key=lambda x: x[1])[0]
+                  for stem, words in stem_count.items() }
+    f.write(json.dumps(stems, indent=1))
 
 print("Done!")

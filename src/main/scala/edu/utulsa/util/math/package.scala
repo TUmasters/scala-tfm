@@ -38,6 +38,12 @@ package object math {
     log(vecs.map(_ :- m).map(exp(_)).reduce(_ + _)) :+ m
   }
 
+  def lop(a: DenseVector[Double], b: DenseVector[Double]) = {
+    require(a.length == b.length, "Invalid dimensions: a.length != b.length")
+    val k = a.length
+    tile(a, 1, k) + tile(b, 1, k).t
+  }
+
   /** Several debug message methods, to make it easier to read output. **/
 
   def disp(x: DenseVector[Double]): Unit = {

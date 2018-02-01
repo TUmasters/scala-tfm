@@ -103,9 +103,12 @@ object Driver extends CLIApp {
         .register
 
       override def exec(): Unit = {
-        val model = $(algorithm).exec()
         println(s"Training ${$(algorithm).name}...")
+        val startTime = System.currentTimeMillis()
+        val model = $(algorithm).exec()
         model.train($(corpus))
+        val endTime = System.currentTimeMillis()
+        println(f"Completed in ${(endTime - startTime) / 1000.0}%.4fs")
         println(s"Saving model to '${$(outputDir)}'...")
         model.save($(outputDir))
         println("Done.")
@@ -157,7 +160,7 @@ object Driver extends CLIApp {
       }
     })
     .add(new Command[Unit] {
-      override def name = "evaluate-convs"
+      override def name = "evaluate-depth"
       override def help = "Evaluate the topic model against conversations of a particular depth."
 
       algorithm.register
@@ -258,7 +261,7 @@ object Driver extends CLIApp {
           println(f"Topics: $topics%3d")
 
 //          val model: TopicModel = new ConversationAwareTFM(topics, $(corpus).words.size, 3, 30, 20)
-          val model: TopicModel = new MarkovTFM(topics, $(corpus).words.size, 30)
+          val model: TopicModel = new ConversationAwareTFM(topics, $(corpus).words.size, 3, 30, 20)
 //          val model: TopicModel = new UnigramTM(topics, $(corpus).words.size, 10)
           model.train(train)
 

@@ -106,10 +106,10 @@ sealed class MTFMOptimizer
   import infer._
 
   val N: Int = corpus.documents.size
-  /** LATENT VARIABLE ESTIMATES **/
-  val q: DenseMatrix[Double] = DenseMatrix.zeros[Double](K, N) // k x n
 
-  val roots: Seq[Int] = trees.map((tree) => tree.root.index)
+  val q: Matrix = DenseMatrix.zeros(K, N)
+
+  val roots: Seq[DNode] = nodes.filter(_.isRoot)
 
   private val b: CSCMatrix[Double] = {
     val builder = new CSCMatrix.Builder[Double](N, N)
@@ -158,12 +158,12 @@ sealed class MTFMOptimizer
     Seq(
       () => {
         // Pi Maximization
-        pi := roots.map((index) => q(::, index)).reduce(_ + _)
-        pi := normalize(pi + 1e-3, 1.0)
+        pi := roots.map((node) => !node.z).reduce(_ + _)
+        pi := normalize(pi + (1e-3 / K), 1.0)
       },
       () => {
         // A maximization
-        a := normalize((q * b * q.t) + (1.0 / K), Axis._0, 1.0)
+        a := normalize((q * b * q.t) + (1e-3 / K), Axis._0, 1.0)
       },
       () => {
         // Theta maximization

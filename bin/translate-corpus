@@ -9,7 +9,7 @@
 
 import argparse
 import json
-import os
+import os, shutil
 from _document import parse_corpus
 
 
@@ -31,7 +31,7 @@ def split_depth(corpus, depth):
     return train_corpus, test_corpus
 
 
-def load_corpus(corpus_file):
+def load_corpus(corpus_file, unstemmer=None):
     print('Loading...')
     if not os.path.exists(corpus_file):
         print("Could not find file '{}'.".format(corpus_file))
@@ -44,6 +44,11 @@ def load_corpus(corpus_file):
         item['parent'] = None
 
     corpus = parse_corpus(data)
+
+    if unstemmer:
+        for doc in corpus:
+            doc.words = [unstemmer[word] for word in doc.words]
+
     return corpus
 
 
@@ -58,8 +63,13 @@ if __name__ == '__main__':
     parser.add_argument('corpus_file', type=str, metavar='D', help='file with documents.')
     args = parser.parse_args()
 
-    corpus = load_corpus(args.corpus_file)
     corpus_dir = os.path.dirname(args.corpus_file)
+
+    stem_file = corpus_dir + '/stem.json'
+    with open(stem_file, 'r') as f:
+        unstemmer = json.load(f)
+
+    corpus = load_corpus(args.corpus_file, unstemmer)
     depth_dir = corpus_dir + '/btm'
 
     if not os.path.exists(depth_dir):
