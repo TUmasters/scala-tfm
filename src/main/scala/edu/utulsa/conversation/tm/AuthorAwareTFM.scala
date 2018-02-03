@@ -58,7 +58,7 @@ class AuthorAwareTFM
     val userGroups: Map[String, List[TPair]] = optim.unodes.map((node) => {
       var name: String = optim.corpus.authors(node.user)
       if (name == null) name = "[deleted]"
-      name -> List((!node.r).toArray.zipWithIndex.map { case (p, i) => TPair(p, i) }.maxBy(_.p))
+      name -> List((!node.y).toArray.zipWithIndex.map { case (p, i) => TPair(p, i) }.maxBy(_.p))
     }).toMap
     writeJson(new File(dir + f"/user-groups.json"), userGroups)
 

@@ -51,7 +51,7 @@ class ConversationAwareTFM
     val userGroups: Map[String, List[TPair]] = optim.unodes.map((node) => {
       var name: String = optim.corpus.authors(node.user)
       if (name == null) name = "[deleted]"
-      name -> List((!node.r).toArray.zipWithIndex.map { case (p, i) => TPair(p, i) }.maxBy(_.p))
+      name -> List((!node.y).toArray.zipWithIndex.map { case (p, i) => TPair(p, i) }.maxBy(_.p))
     }).toMap
     writeJson(new File(dir + f"/user-groups.json"), userGroups)
 
@@ -72,7 +72,6 @@ class ConversationAwareTFM
     optim = new CATFMOptimize(corpus, this)
     optim.fit(numIterations, maxEIterations)
   }
-
 
   override def logLikelihood(corpus: Corpus): Double = {
     val infer = new CATFMOptimize(corpus, this)
@@ -170,17 +169,18 @@ sealed class CATFMOptimize(val corpus: Corpus, params: CATFMParams) {
   }   // n x m
 
   def fit(numIterations: Int, maxEIterations: Int): Unit = {
+    println(f"initial ${approxLikelihood() / corpus.wordCount}%12.4f")
     (1 to numIterations).foreach { (interval) =>
-//      println(f"iteration $interval%4d")
+      println(f"iteration $interval%4d")
       eStep(maxEIterations)
-//      println(f"$interval%4d e-step ${approxLikelihood()}%12.4f")
+      println(f"$interval%4d e-step ${approxLikelihood() / corpus.wordCount}%12.4f")
       mStep()
-//      println(f"$interval%4d m-step ${approxLikelihood()}%12.4f")
+      println(f"$interval%4d m-step ${approxLikelihood() / corpus.wordCount}%12.4f")
     }
   }
 
   def eStep(maxEIterations: Int): Unit = {
-    update(trees, dnodes, unodes, G, maxEIterations)
+    update(maxEIterations)
 
     trees.par.foreach { tree =>
       tree.nodes.foreach { node =>
@@ -189,20 +189,17 @@ sealed class CATFMOptimize(val corpus: Corpus, params: CATFMParams) {
     }
 
     unodes.par.foreach { node =>
-      r(::, node.user) := !node.r
+      r(::, node.user) := !node.y
     }
 
     (0 until G).foreach { (g) =>
       qr(g) := q
       unodes.foreach { (unode) =>
         unode.documents.foreach { (dnode) =>
-          qr(g)(::, dnode.index) :*= (!unode.r) (g)
+          qr(g)(::, dnode.index) :*= (!unode.y) (g)
         }
       }
     }
-
-    println("infer")
-    println(r(::, 0))
   }
 
   def mStep(): Unit = {
@@ -214,7 +211,7 @@ sealed class CATFMOptimize(val corpus: Corpus, params: CATFMParams) {
         }
       },
       () => {
-        phi := normalize(unodes.map(n => !n.r).reduce(_ + _) + 1e-3, 1.0)
+        phi := normalize(unodes.map(n => !n.y).reduce(_ + _) + 1e-3, 1.0)
       },
       () => {
         // A maximization
@@ -237,18 +234,33 @@ sealed class CATFMOptimize(val corpus: Corpus, params: CATFMParams) {
     println(phi)
     println(pi(0))
     println(pi(1))
-    reset()
+    params.reset()
   }
 
-  def build(corpus: Corpus): (Seq[DTree], Seq[DNode], Seq[UNode]) = {
+  def update(numIterations: Int): Unit = {
+    import scala.util.control.Breaks._
+    var yerror = Double.PositiveInfinity
+    var iter = 0
+    while(yerror > 1e-2 && iter < numIterations) {
+      trees.par.foreach { tree =>
+        var treeIter = 0
+        while(tree.update() > 1e-2 && treeIter < 10) { treeIter += 1 }
+      }
+      unodes.par.foreach { node => node.reset(); node.y.update() }
+      yerror = unodes.map(_.dist).sum / unodes.size
+      iter += 1
+    }
+  }
+
+  def build(corpus: Corpus): (Seq[DTree], Seq[DNode], Seq[GNode]) = {
     val dnodes: Seq[DNode] = corpus.extend(new DNode(_, _))
     val convs: Map[DNode, Seq[DNode]] = dnodes.groupBy(_.root)
-    val unodes: Seq[UNode] = convs.zipWithIndex.map { case ((root, docs), id) =>
-      new UNode(id, docs)
+    val unodes: Seq[GNode] = convs.zipWithIndex.map { case ((root, docs), id) =>
+      new GNode(id, docs)
     }.toSeq
     unodes.foreach { node =>
       for(dnode <- node.documents)
-        dnode.author = node
+        dnode.group = node
     }
     val trees: Seq[DTree] = dnodes
       .filter(_.isRoot)
@@ -264,12 +276,12 @@ sealed class CATFMOptimize(val corpus: Corpus, params: CATFMParams) {
   def approxLikelihood(numSamples: Int = 500): Double = {
     val samples: Seq[Double] = (1 to numSamples).par.map { i =>
       val topics: Map[DNode, Int] = dnodes.map(node => node -> sample(!node.topicProbs)).toMap
-      val groups: Map[UNode, Int] = unodes.map(node => node -> sample(!node.groupProbs)).toMap
+      val groups: Map[GNode, Int] = unodes.map(node => node -> sample(!node.groupProbs)).toMap
       val logPZ: Double = dnodes.par.map(node => (!node.logPw)(topics(node))).sum
       val logZ: Double = dnodes.par.map(_.logP(topics, groups)).sum +
         unodes.par.map(_.logP(topics, groups)).sum
       val logQ: Double = dnodes.par.map(node => log((!node.z)(topics(node)))).sum +
-        unodes.par.map(node => log((!node.r)(groups(node)))).sum
+        unodes.par.map(node => log((!node.y)(groups(node)))).sum
       val logP: Double = logPZ + logZ
       logP - logQ
     }.seq
@@ -277,39 +289,45 @@ sealed class CATFMOptimize(val corpus: Corpus, params: CATFMParams) {
   }
 
   ////////////////////////////////////////////////////////////////
-  // USER NODE
+  // GROUP NODE
   ////////////////////////////////////////////////////////////////
-  sealed class UNode(val user: Int, val documents: Seq[DNode]) extends TermContainer {
+  sealed class GNode(val user: Int, val documents: Seq[DNode]) extends TermContainer {
 
-    def dist: Double = norm(!r :- oldR)
+    def dist: Double = norm(!y :- oldY)
 
-    val oldR: Vector = DenseVector.zeros[Double](G)
-    val r: Term[Vector] = Term {
+    val oldY: Vector = DenseVector.zeros[Double](G)
+    val y: Term[Vector] = Term {
       //      val oldR = (!r).copy
 //      val n: Vector = DenseVector.zeros[Double](G)
 //      n := !logPhi
-      val newR: Vector = DenseVector.zeros(G)
+      val newY: Vector = DenseVector.zeros(G)
       for(c <- 0 until G) {
         val terms: Seq[Double] = documents.map { case (node) =>
           node.parent match {
             case None =>
-              lse((!node.logZ) + (!logPi)(c))
+              sum((!node.z) :* (!logPi)(c))
             case Some(p) =>
-              val o = log((!p.z) * (!node.z).t) + (!logA)(c)
-              //if(user == 0) println(o)
-              lse(o.toArray)
+              sum(((!p.z) * (!node.z).t) :* (!logA)(c))
           }
         }
-        newR(c) = (!logPhi)(c) + lse(terms)
+        newY(c) = (!logPhi)(c) + sum(terms)
       }
-      exp(newR - lse(newR))
-    }.initialize {
-      val n = DenseVector.zeros[Double](G)
-      n := normalize(DenseVector.rand[Double](G), 1.0)
-      n
+      exp(newY - sum(newY))
+    }.initialize { normalize(DenseVector.rand[Double](G), 1.0) }
+
+    val logQa: Term[Matrix] = Term {
+      (0 until G).map { c =>
+        (!y)(c) * (!logA)(c)
+      }.reduce(_ + _)
     }
 
-    def logP(topics: Map[DNode, Int], groups: Map[UNode, Int]): Double = {
+    val logQpi: Term[Vector] = Term {
+      (0 until G).map { c =>
+        (!y)(c) * (!logPi)(c)
+      }.reduce(_ + _)
+    }
+
+    def logP(topics: Map[DNode, Int], groups: Map[GNode, Int]): Double = {
       if(G <= 1)
         0d
       else
@@ -317,11 +335,11 @@ sealed class CATFMOptimize(val corpus: Corpus, params: CATFMParams) {
     }
 
     val groupProbs: Term[Map[Int, Double]] = Term {
-      (!r).toArray.zipWithIndex.map(t => (t._2, t._1)).toMap
+      (!y).toArray.zipWithIndex.map(t => (t._2, t._1)).toMap
     }
 
     override def reset(): Unit = {
-      oldR := !r
+      oldY := !y
       super.reset()
     }
   }
@@ -333,7 +351,7 @@ sealed class CATFMOptimize(val corpus: Corpus, params: CATFMParams) {
   class DNode(override val document: Document, override val index: Int)
     extends DocumentNode[DNode](document, index) with TermContainer {
 
-    var author: UNode = _
+    var group: GNode = _
 
     def root: DNode = parent match {
       case Some(p) => p.root
@@ -351,70 +369,35 @@ sealed class CATFMOptimize(val corpus: Corpus, params: CATFMParams) {
         .fold(ZERO)(_ + _)
     }
 
-    val lambda: Term[Vector] = Term {
-      // Lambda messages regarding likelihood of observing the document
-      val msg1 = !logPw
-      // Lambda messages from children
-      val msg2 = replies.map(!_.lambdaMsg).fold(ZERO)(_ + _)
-      msg1 + msg2
-    }
-
-    /** Return: Kx1 vector for each value of their parent. **/
-    val lambdaMsg: Term[Vector] = Term {
-      lse((0 until G).map((g) => lse(a(g), !lambda) * (!author.r)(g)).toArray)
-    }
-
-    val tau: Term[Vector] = Term {
-      parent match {
-        case None =>
-          lse((!logPi).zipWithIndex.map { case (pi_g, g) =>
-            pi_g * (!author.r) (g)
-          })
-        case Some(p) =>
-          lse((0 until G).map((g) => lse(a(g), !tauMsg) * (!author.r)(g)).toArray)
-//          val msg2 = siblings
-//            .map((sibling) => !sibling.tauMsg)
-//            .fold(DenseVector.zeros[Double](K))(_ + _)
-//          msg1 + msg2
-      }
-    }
-
-    val tauMsg: Term[Vector] = Term {
-      parent match {
-        case Some(p) => (Array(!p.tau) ++ siblings.map(!_.lambdaMsg)).reduce(_ + _)
-        case None => null
-      }
-    }
-
-    def dist: Double = norm(!z - oldZ)
-
-    val oldZ: Vector = DenseVector.zeros[Double](K)
     val logZ: Term[Vector] = Term {
-      val tmp = (!lambda) + !tau
+      val t1 = !logPw
+      val t2 = parent match {
+        case None => !group.logQpi
+        case Some(p) => (!group.logQa).t * !p.z
+      }
+      val t3 = replies.map { r =>
+        (!group.logQa) * !r.z
+      }.fold(ZERO)(_ + _)
+      val tmp = t1 + t2 + t3
       tmp - lse(tmp)
     }.initialize {
       val a = log(DenseVector.rand[Double](K))
       a - lse(a)
     }
-    val z: Term[Vector] = Term { exp(!logZ) }
 
+    def dist: Double = norm(!z - oldZ)
+    val oldZ: Vector = DenseVector.zeros[Double](K)
+    val z: Term[Vector] = Term {
+      exp(!logZ)
+    }
 
     val topicProbs: Term[Map[Int, Double]] = Term {
       (!z).toArray.zipWithIndex.map(t => (t._2, t._1)).toMap
     }
 
-    val logLikelihood: Term[Double] = Term {
-      parent match {
-        case None =>
-          lse(pi.zipWithIndex.map { case (piG, g) => lse(!logPw :+ log(piG * (!author.r)(g))) })
-        case Some(parent) =>
-          lse(a.zipWithIndex.map { case (aG, g) => lse(!logPw :+ log(aG.t * !parent.z * (!author.r)(g)))})
-      }
-    }
-
-    def logP(topics: Map[DNode, Int], groups: Map[UNode, Int]): Double = {
+    def logP(topics: Map[DNode, Int], groups: Map[GNode, Int]): Double = {
       val z = topics(this)
-      val y = groups(author)
+      val y = groups(group)
       val term1: Double = parent match {
         case Some(p) =>
           val zp: Int = topics(p)
@@ -422,7 +405,6 @@ sealed class CATFMOptimize(val corpus: Corpus, params: CATFMParams) {
         case None =>
           (!logPi)(y)(z)
       }
-//      val term2: Double = replies.foldLeft(0d)((p, reply) => p + reply.logP(topics, groups))
       term1
     }
 
@@ -433,7 +415,6 @@ sealed class CATFMOptimize(val corpus: Corpus, params: CATFMParams) {
   }
 
   sealed class DTree(val root: DNode) {
-    import params._
     private def expand(node: DNode): Seq[DNode] = {
       val children =
         if (node.replies != null) node.replies.flatMap((child) => expand(child))
@@ -441,37 +422,30 @@ sealed class CATFMOptimize(val corpus: Corpus, params: CATFMParams) {
       Seq(node) ++ children
     }
 
-    lazy val nodes: Seq[DNode] = expand(root)
-    lazy val users: Seq[UNode] = nodes.map(_.author).distinct
-
-    def reset(): Unit = nodes.foreach { (node) => node.reset() }
-
-    def loglikelihood: Double = nodes.map(!_.logLikelihood).sum
-
-    def logP(topics: Map[DNode, Int], groups: Map[UNode, Int]) = {
-      nodes.map(_.logP(topics, groups)).sum
-    }
-  }
-
-  def update(trees: Seq[DTree], dnodes: Seq[DNode], unodes: Seq[UNode], G: Int, numIterations: Int): Unit = {
-    import scala.util.control.Breaks._
-    val roots = dnodes.filter(_.isRoot)
-    breakable {
-      for(i <- 1 to numIterations) {
-//        println(s" $i")
-//        println("  category")
-        unodes.par.foreach(author => author.reset())
-        unodes.par.foreach(author => author.r.update())
-//        println("  nodes")
-        dnodes.par.foreach(document => document.reset())
-        dnodes.par.foreach(document => document.update())
-        val docError: Double = dnodes.map(_.dist).sum / dnodes.size
-        val userError: Double = unodes.map(_.dist).sum / unodes.size
-//        val docUncert: Double = sum(dnodes.map((dnode) => if(any(!dnode.z :> 0.5)) 1 else 0))
-//        val userUncert: Double = sum(unodes.map((unode) => if(any(!unode.r :> 0.5)) 1 else 0))
-        if(docError <= 1e-3 && userError <= 1e-3)
-          break
+    private def splitDepth(nodes: Seq[DNode]): List[Seq[DNode]] = {
+      if(nodes.isEmpty) List()
+      else {
+        val nextLevel = nodes.flatMap(_.replies)
+        List(nodes) ::: splitDepth(nextLevel)
       }
+    }
+
+    def update(): Double = {
+      for(level <- levels) {
+        level.par.foreach { node => node.reset(); node.z.update() }
+      }
+      for(level <- levels.reverse) {
+        level.par.foreach { node => node.reset(); node.z.update() }
+      }
+      nodes.map(_.dist).sum / nodes.size
+    }
+
+    lazy val levels: List[Seq[DNode]] = splitDepth(Seq(root))
+    lazy val nodes: Seq[DNode] = expand(root)
+    lazy val users: Seq[GNode] = nodes.map(_.group).distinct
+
+    def logP(topics: Map[DNode, Int], groups: Map[GNode, Int]) = {
+      nodes.map(_.logP(topics, groups)).sum
     }
   }
 }
