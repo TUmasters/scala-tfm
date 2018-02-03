@@ -200,6 +200,7 @@ sealed class CATFMOptimize(val corpus: Corpus, params: CATFMParams) {
         }
       }
     }
+    println(!unodes.head.y)
   }
 
   def mStep(): Unit = {
@@ -312,7 +313,7 @@ sealed class CATFMOptimize(val corpus: Corpus, params: CATFMParams) {
         }
         newY(c) = (!logPhi)(c) + sum(terms)
       }
-      exp(newY - sum(newY))
+      exp(newY - lse(newY))
     }.initialize { normalize(DenseVector.rand[Double](G), 1.0) }
 
     val logQa: Term[Matrix] = Term {
