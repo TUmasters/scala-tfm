@@ -6,7 +6,7 @@ import breeze.linalg._
 import breeze.numerics._
 import edu.utulsa.conversation.text.{Corpus, Document}
 
-class LDA
+class LatentDirichletAllocation
 (
   override val numTopics: Int,
   val numWords: Int

@@ -6,6 +6,8 @@ import edu.utulsa.cli.{Action, CLIApp, Command, Param, ParamConverter, validator
 import edu.utulsa.conversation.text.{Corpus, Document}
 import edu.utulsa.conversation.tm._
 
+import scala.collection.mutable
+
 object Driver extends CLIApp {
   implicit object CorpusConverter extends ParamConverter[Corpus] {
     override def decode(filename: String): Corpus = {
@@ -72,7 +74,7 @@ object Driver extends CLIApp {
         .register
 
       override def exec(): TopicModel = {
-        new ConversationAwareTFM($(numTopics), $(corpus).words.size, $(numUserGroups), $(numIterations), $(numEIterations))
+        new LatentCommunityTFM($(numTopics), $(corpus).words.size, $(numUserGroups), $(numIterations), $(numEIterations))
       }
     })
     .add(new Command[TopicModel] {
@@ -168,11 +170,16 @@ object Driver extends CLIApp {
 
       val startDepth: Param[Int] = Param("start-depth")
         .help("Depth of conversations to use for training set.")
-        .default(2)
+        .default(0)
         .register
 
       val endDepth: Param[Int] = Param("end-depth")
         .help("Depth to stop testing at.")
+        .default(1)
+        .register
+
+      val numTrials: Param[Int] = Param("num-trials")
+        .help("Number of trials to run for each depth.")
         .default(10)
         .register
 
@@ -189,7 +196,7 @@ object Driver extends CLIApp {
         println(s"Evaluating on conversations of depth ${$(startDepth)}-${$(endDepth)}.")
         println(s"Training ${$(algorithm).name} on ${$(corpus).roots.size} conversations")
 
-        val depthInfo = ($(startDepth) to $(endDepth)).map { case depth =>
+        val results: Seq[Map[String, Any]] = ($(startDepth) to $(endDepth)).map { depth: Int =>
           val train: Corpus = split($(corpus), depth)
           val trainSize: Int = train.size
           val testSize: Int = $(corpus).size - train.size
@@ -198,26 +205,44 @@ object Driver extends CLIApp {
           val trainWords = train.documents.flatMap(_.count.map(_._2)).sum
           val testWords = $(corpus).documents.flatMap(_.count.map(_._2)).sum - trainWords
 
-          val model: TopicModel = $(algorithm).exec()
-          model.train(train)
+          val trainPerplexities: mutable.ListBuffer[Double] = mutable.ListBuffer()
+          val testPerplexities: mutable.ListBuffer[Double] = mutable.ListBuffer()
+          for(trial <- 1 to $(numTrials)) {
+            val model: TopicModel = $(algorithm).exec()
+            model.train(train)
+            val ll1 = model.logLikelihood(train)
+            val ll2 = model.logLikelihood($(corpus))
+            val p1 = ll1 / trainWords
+            val p2 = (ll2 - ll1) / testWords
+            trainPerplexities += p1
+            testPerplexities += p2
+            println(s"  Trial $trial")
+            println(f"   Train perplexity:    $p1%6.4f")
+            println(f"   Left-out perplexity: $p2%6.4f")
+          }
 
-          val ll1 = model.logLikelihood(train)
-          val ll2 = model.logLikelihood($(corpus))
-          println(f" Train perplexity:    ${ll1 / trainWords}%6.4f")
-          println(f" Left-out perplexity: ${(ll2 - ll1) / testWords}%6.4f")
+          println(s" Avg. train perplexity:    ${trainPerplexities.sum / $(numTrials)}")
+          println(s" Avg. left-out perplexity: ${testPerplexities.sum / $(numTrials)}")
           Map(
             "depth" -> depth,
             "train-words" -> trainWords,
             "train-size" -> trainSize,
             "test-words" -> testWords,
             "test-size" -> testSize,
-            "train-perplexity" -> (ll1 / trainWords),
-            "test-perplexity" -> ((ll2 - ll1) / testWords)
+            "train-perplexities" -> trainPerplexities.toList,
+            "test-perplexities" -> testPerplexities.toList
           )
         }
 
+        for(result <- results) {
+          val d: Int = result("depth").asInstanceOf[Int]
+          val r1: Double = result("train-perplexities").asInstanceOf[List[Double]].sum / $(numTrials)
+          val r2: Double = result("test-perplexities").asInstanceOf[List[Double]].sum / $(numTrials)
+          println(f"$d%4d   $r1%2.8f    $r2%2.8f")
+        }
+
         import edu.utulsa.util.writeJson
-        writeJson($(resultsFile), depthInfo)
+        writeJson($(resultsFile), results)
       }
     })
     .add(new Command[Unit] {
@@ -257,11 +282,10 @@ object Driver extends CLIApp {
 
         println(f"Train size: ${train.size}%6d Test size: ${test.size}%6d")
         val topicInfo = Range($(startTopics), $(endTopics), 2).map { topics =>
-
           println(f"Topics: $topics%3d")
 
 //          val model: TopicModel = new ConversationAwareTFM(topics, $(corpus).words.size, 3, 30, 20)
-          val model: TopicModel = new ConversationAwareTFM(topics, $(corpus).words.size, 3, 30, 20)
+          val model: TopicModel = new LatentCommunityTFM(topics, $(corpus).words.size, 3, 30, 20)
 //          val model: TopicModel = new UnigramTM(topics, $(corpus).words.size, 10)
           model.train(train)
 

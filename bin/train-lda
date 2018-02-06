@@ -44,35 +44,45 @@ def run_depth_tests(corpus_file, num_topics):
         # print("depth {}".format(depth))
         run_lda(X_train, X_test, num_topics)
 
-def run_lda(X_train, X_test, num_topics):
+def run_lda(X_train, X_test, num_topics, num_trials=10):
     # from sklearn.decomposition import LatentDirichletAllocation
     from gensim.models.ldamulticore import LdaMulticore
+    from gensim.models.ldamodel import LdaModel
 
     train_size = len(X_train)
     test_size = len(X_test)
 
     print("num topics: {:6d}".format(num_topics))
-    print(" train: {:6d} test: {:6d}".format(train_size, test_size))
+    print("train: {:6d} test: {:6d}".format(train_size, test_size))
 
-    lda = LdaMulticore(X_train, num_topics=num_topics)
-    # lda.fit(X_d)
-    # ll1 = lda.score(X_d)
-    # ll2 = lda.score(X)
-    ll1 = lda.log_perplexity(X_train)
-    ll2 = lda.log_perplexity(X_test)
+    p1 = []
+    p2 = []
+    for trial in range(num_trials):
+        print("  trial {}".format(trial))
+        lda = LdaModel(X_train, num_topics=num_topics)
+        tp1 = lda.log_perplexity(X_train)
+        tp2 = lda.log_perplexity(X_test)
+        p1 += [tp1]
+        p2 += [tp2]
+        print("   perplexity:          {:2.8f}".format(tp1))
+        print("   left-out perplexity: {:2.8f}".format(tp2))
 
-    print(" Score:           {}".format(ll1))
-    print(" Test perplexity: {}".format(ll2))
+    print("avg. perplexity:          {:2.8f}".format(np.mean(p1)))
+    print("avg. left-out perplexity: {:2.8f}".format(np.mean(p2)))
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Trains LDA on textual data.')
     parser.add_argument('corpus_file', type=str, metavar='D', help='file with documents.')
-    parser.add_argument('--num-topics', type=int, help='number of documents to train on.', default=25)
+    parser.add_argument('--num-topics', type=int, help='number of documents to train on.', default=2)
 
     args = parser.parse_args()
-    X = load_corpus(args.corpus_file)
+
+    ## depth tests
     run_depth_tests(args.corpus_file, args.num_topics)
+
+    # ## topic tests
+    # corpus, X = load_corpus(args.corpus_file)
     # random.shuffle(X)
     # test_size = 1000
     # (X_test, X_train) = (X[:test_size], X[test_size:])
