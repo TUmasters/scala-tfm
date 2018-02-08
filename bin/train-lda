@@ -7,6 +7,7 @@ import os, shutil
 from _document import parse_corpus
 import random
 from gensim import corpora
+import itertools
 
 def load_corpus(corpus_file):
     print('Loading...')
@@ -24,30 +25,35 @@ def load_corpus(corpus_file):
 
     print('Vectorizing...')
     d = corpora.Dictionary([doc.words for doc in corpus])
+    # print(d.token2id)
     X = [d.doc2bow(doc.words) for doc in corpus]
 
     # from sklearn.feature_extraction.text import CountVectorizer
     # vectorizer = CountVectorizer()
     # X = vectorizer.fit_transform([str.join(' ', document.words) for document in corpus])
     # n = len(data)
-    return corpus, X
+    return corpus, d, X
 
 ## Process documents
 def run_depth_tests(corpus_file, num_topics):
-    corpus, X = load_corpus(corpus_file)
+    corpus, dictionary, X = load_corpus(corpus_file)
 
-    for depth in range(2, 11):
+    for depth in range(0, 11):
         idx_d = set([index for index, document in enumerate(corpus) if document.level <= depth])
         # X_d = X[idx_d, :]
         X_test = [X[i] for i in range(len(corpus)) if not i in idx_d]
         X_train = [X[i] for i in idx_d]
         # print("depth {}".format(depth))
-        run_lda(X_train, X_test, num_topics)
+        run_lda(X_train, X_test, num_topics, dictionary=dictionary)
 
-def run_lda(X_train, X_test, num_topics, num_trials=10):
+def run_lda(X_train, X_test, num_topics, num_trials=1, dictionary=None):
     # from sklearn.decomposition import LatentDirichletAllocation
     from gensim.models.ldamulticore import LdaMulticore
     from gensim.models.ldamodel import LdaModel
+    from gensim.models.hdpmodel import HdpModel
+    import logging
+
+    logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging.INFO)
 
     train_size = len(X_train)
     test_size = len(X_test)
@@ -58,8 +64,8 @@ def run_lda(X_train, X_test, num_topics, num_trials=10):
     p1 = []
     p2 = []
     for trial in range(num_trials):
-        print("  trial {}".format(trial))
-        lda = LdaModel(X_train, num_topics=num_topics)
+        print("  trial {}".format(trial+1))
+        lda = HdpModel(corpus=X_train, id2word=dictionary)
         tp1 = lda.log_perplexity(X_train)
         tp2 = lda.log_perplexity(X_test)
         p1 += [tp1]
@@ -78,13 +84,13 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    ## depth tests
-    run_depth_tests(args.corpus_file, args.num_topics)
+    # ## depth tests
+    # run_depth_tests(args.corpus_file, args.num_topics)
 
-    # ## topic tests
-    # corpus, X = load_corpus(args.corpus_file)
-    # random.shuffle(X)
-    # test_size = 1000
-    # (X_test, X_train) = (X[:test_size], X[test_size:])
-    # for num_topics in [1, 2, 3, 4, 5, 10, 20, 50, 100, 200, 500]:
-    #     run_lda(X_train, X_test, num_topics)
+    ## topic tests
+    corpus, dictionary, X = load_corpus(args.corpus_file)
+    random.shuffle(X)
+    test_size = 1000
+    (X_test, X_train) = (X[:test_size], X[test_size:])
+    for num_topics in [1, 2, 3, 4, 5, 10, 20, 50, 100, 200, 500]:
+        run_lda(X_train, X_test, num_topics, dictionary=dictionary)

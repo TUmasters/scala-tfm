@@ -17,6 +17,10 @@ class UnigramTM
   val pi: Vector = DenseVector.rand(numTopics)
   val theta: Matrix = normalize(DenseMatrix.rand(numWords, numTopics), Axis._0, 1.0)
 
+//  /** RANDOM WORD DISTRIBUTION **/
+//  val rho: Vector = DenseVector(0.5)
+//  val phi: Vector = normalize(DenseVector.rand(numWords))
+
   var optim: UTMOptimizer = _
 
   override protected def saveModel(dir: File): Unit = {
@@ -80,7 +84,7 @@ sealed class UTMOptimizer(val corpus: Corpus, val params: UTMParams) {
   def mStep(): Unit = {
     pi := nodes.map(!_.q).reduce(_ + _)
     pi := normalize(pi + 1e-3, 1.0)
-    theta := DenseMatrix.ones[Double](numWords, numTopics) * 1e-3
+    theta := DenseMatrix.ones[Double](numWords, numTopics) * 0.1
     nodes.par.foreach { node =>
       node.document.count.foreach { case (word, count) =>
           theta(word, ::) :+= (!node.q).t * count.toDouble
@@ -116,9 +120,6 @@ sealed class UTMInfer(val corpus: Corpus, val params: UTMParams) {
         val logZ = (!logPi)(topic)
         val logQ = (!node.logQ)(topic)
         val logP = logPZ + logZ
-//        if(logPZ.isInfinite || logZ.isInfinite || logQ.isInfinite) {
-//          println(s" error $logPZ $logZ $logQ")
-//        }
         logP - logQ
       }).seq
       lse(samples) - log(numSamples)
@@ -140,25 +141,10 @@ sealed class UTMInfer(val corpus: Corpus, val params: UTMParams) {
   }
 
   def inferUpdate(): Unit = {
-//    val q: DenseMatrix[Double] = DenseMatrix.zeros[Double](numTopics, corpus.size) // k x n
     nodes.par.foreach { n =>
       n.reset()
       n.update()
-//      q(::, n.index) := !n.q
     }
-//    val dist = nodes.map(n => norm(pi - !n.eDist)).sum / nodes.size
-//    val a = normalize((q * b * q.t) + 1e-3, Axis._0, 1.0)
-//    val p1 = nodes.map(n => lse((!n.logPw) + (!n.logQ))).sum / corpus.wordCount
-//    val p2 = nodes.map { n =>
-//      n.parent match {
-//        case Some(p) => log((!p.q).t * a * (!n.q))
-//        case None => lse((!logPi) + !n.logQ)
-//      }
-//    }.sum / nodes.size
-//    val p3 = nodes.map(n => lse((!logPi) + !n.logQ)).sum / nodes.size
-//
-////    println(dist)
-//    println(f"$p1%6.4f + $p2%6.4f ~ $p3%6.4f")
   }
   val nodes: Seq[DNode] = corpus.extend(new DNode(_, _))
 

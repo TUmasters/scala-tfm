@@ -81,7 +81,7 @@ if __name__ == '__main__':
             f.write('{}\t{}\n'.format(w_id, w))
 
     save_btm(corpus, d2ids, depth_dir + "/corpus.txt")
-    for depth in range(2, 11):
+    for depth in range(0, 11):
         print("depth", depth)
         train, test = split_depth(corpus, depth)
         save_btm(train, d2ids, depth_dir + '/depth{:02d}_train.txt'.format(depth))

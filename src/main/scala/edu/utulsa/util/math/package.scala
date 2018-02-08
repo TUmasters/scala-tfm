@@ -5,7 +5,6 @@ import java.io.{File, PrintWriter}
 import breeze.generic.{MappingUFunc, UFunc}
 import breeze.linalg._
 import breeze.numerics.{exp, log}
-import com.sun.javaws.exceptions.InvalidArgumentException
 import org.apache.commons.math3.special.Gamma
 
 package object math {

@@ -175,7 +175,7 @@ object Driver extends CLIApp {
 
       val endDepth: Param[Int] = Param("end-depth")
         .help("Depth to stop testing at.")
-        .default(1)
+        .default(10)
         .register
 
       val numTrials: Param[Int] = Param("num-trials")
@@ -207,6 +207,7 @@ object Driver extends CLIApp {
 
           val trainPerplexities: mutable.ListBuffer[Double] = mutable.ListBuffer()
           val testPerplexities: mutable.ListBuffer[Double] = mutable.ListBuffer()
+          val topWords: mutable.ListBuffer[Seq[Seq[String]]] = mutable.ListBuffer()
           for(trial <- 1 to $(numTrials)) {
             val model: TopicModel = $(algorithm).exec()
             model.train(train)

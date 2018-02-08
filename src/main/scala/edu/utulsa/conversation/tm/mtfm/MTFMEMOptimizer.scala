@@ -83,11 +83,11 @@ sealed class MTFMOptimizer
       () => {
         // Pi Maximization
         pi := roots.map((node) => !node.z).reduce(_ + _)
-        pi := normalize(pi + (1e-3 / K), 1.0)
+        pi := normalize(pi + 1e-3, 1.0)
       },
       () => {
         // A maximization
-        a := normalize((q * b * q.t) + (1e-3 / K), Axis._0, 1.0)
+        a := normalize((q * b * q.t) + (1.0 / K), Axis._0, 1.0)
       },
       () => {
         // Theta maximization

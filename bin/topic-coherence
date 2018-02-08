@@ -2,6 +2,7 @@
 
 import os, json, argparse
 import math
+import numpy as np
 from statistics import mean, median
 from _document import parse_corpus
 import urllib.request, urllib.parse
@@ -44,28 +45,8 @@ corpus = load_corpus(args.corpus_file, unstemmer)
 
 corpus = [doc for doc in corpus if len(doc.words) > 0]
 
-word_p = {}
-for doc in corpus:
-    for word in doc.words:
-        if not word in word_p:
-            word_p[word] = set()
-        word_p[word].add(doc)
 
-
-def lprob(w):
-    return math.log(len(word_p[w]) * 1. / len(corpus))
-
-
-def lprob2(w1, w2):
-    s = len(word_p[w1].intersection(word_p[w2]))
-    if s > 0:
-        return math.log(s / len(corpus))
-    else:
-        # add a big punishment
-        return math.log(0.1 / len(corpus))
-
-
-def palmetto_pmi(words, method='uci', base_url='http://localhost:7777'):
+def palmetto(words, method='umass', base_url='http://localhost:7777'):
     words = [urllib.parse.quote_plus(word) for word in words]
     url = base_url + '/service/{}?words={}'.format(method, '+'.join(words))
     response = urllib.request.urlopen(url)
@@ -73,46 +54,38 @@ def palmetto_pmi(words, method='uci', base_url='http://localhost:7777'):
     return score
 
 
-with open(model_dir + '/params.json', 'r') as f:
-    params = json.load(f)
+def topic_coherence(model_dir):
+    with open(model_dir + '/params.json', 'r') as f:
+        params = json.load(f)
 
-with open(model_dir + '/word-topics.json', 'r') as f:
-    word_topics = json.load(f)
+    with open(model_dir + '/word-topics.json', 'r') as f:
+        word_topics = json.load(f)
 
-topic_words = {k:[] for k in range(params['num-topics'])}
+    topic_words = {k:[] for k in range(params['num-topics'])}
 
-for word, topics in word_topics.items():
-    word = unstemmer[word]
-    for topic_data in topics:
-        k = topic_data['topic']
-        p = topic_data['p']
-        topic_words[k] += [(word, p)]
+    for word, topics in word_topics.items():
+        word = unstemmer[word]
+        for topic_data in topics:
+            k = topic_data['topic']
+            p = topic_data['p']
+            topic_words[k] += [(word, p)]
 
-top_k = 10
-top_words = {}
-for k in range(params['num-topics']):
-    top_words[k] = [w[0] for w in sorted(topic_words[k], key=lambda x: -x[1])[:top_k]]
+    top_k = 10
+    top_words = {}
+    for k in range(params['num-topics']):
+        top_words[k] = [w[0] for w in sorted(topic_words[k], key=lambda x: -x[1])[:top_k]]
+
+    scores = []
+    for k in range(params['num-topics']):
+        score = palmetto(top_words[k])
+        scores += [score]
+    return np.mean(scores)
 
 
-pmi1_scores = []
-pmi2_scores = []
-for k in range(params['num-topics']):
-    print("{:2d} {}".format(k, ' '.join(top_words[k])))
+scores = []
+for trial in range(0, 10):
+    trial_dir = model_dir + '/trial{:02d}'.format(trial)
+    scores += [topic_coherence(trial_dir)]
 
-    ## Method 1
-    pmi1 = []
-    for i in range(top_k):
-        for j in range(i+1, top_k):
-            w1, w2 = top_words[k][i], top_words[k][j]
-            pmi1 += [lprob2(w1, w2) - lprob(w1) - lprob(w2)]
-    print("  pmi mean: {}".format(mean(pmi1)))
-    print("  pmi median: {}".format(median(pmi1)))
-    pmi1_scores += [mean(pmi1)]
-
-    ## Method 2
-    pmi2 = palmetto_pmi(top_words[k])
-    print("  pmi: {}".format(pmi2))
-    pmi2_scores += [pmi2]
-
-print("PMI 1 Score:", mean(pmi1_scores))
-print("PMI 2 Score:", mean(pmi2_scores))
+score_cols = ["{:2.5f}".format(score) for score in scores]
+print("{:2.8f}  {}".format(np.mean(scores), '  '.join(score_cols)))
