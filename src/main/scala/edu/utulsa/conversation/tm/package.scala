@@ -4,8 +4,8 @@ import breeze.linalg.{DenseMatrix, DenseVector, inv, norm, sum}
 
 package object tm {
   // saves some space and I can see how good switch from 64-bit to 32-bit precision is
-  type Vector = DenseVector[Double]
-  type Matrix = DenseMatrix[Double]
+  type DV = DenseVector[Double]
+  type DM = DenseMatrix[Double]
 
   /**
     * Generic specification of an optimization algorithm.

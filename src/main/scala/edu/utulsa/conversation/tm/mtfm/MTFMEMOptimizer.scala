@@ -151,14 +151,10 @@ class MTFMInfer(val corpus: Corpus, val params: MTFMParams) {
     val lls = trees.par.map(tree => {
       val samples: Seq[Double] = (1 to numSamples).par.map(i => {
         // compute likelihood on this sample
-        val topics: Map[DNode, Int] = tree.nodes.map(node => node -> sample(!node.topicProbs)).toMap
-        val logPZ = tree.nodes.map(node => (!node.logPw)(topics(node))).sum
-        val logZ = tree.logP(topics)
-        val logQ = tree.nodes.map(node => log((!node.z)(topics(node)))).sum
-        val logP = logPZ + logZ
-        if(logPZ.isInfinite || logZ.isInfinite || logQ.isInfinite) {
-          println(s" error $logPZ $logZ $logQ")
-        }
+        val topics: Map[DNode, Int] = tree.nodes.map(node => node -> node._z.sample()).toMap
+        val noise: Map[DNode, Seq[(Int, Boolean)]] = tree.nodes.map(node => node -> node._tau.sample()).toMap
+        val logP = tree.nodes.map(node => node.logP(topics, noise)).sum
+        val logQ = tree.nodes.map(node => node.logQ(topics, noise)).sum
         logP - logQ
       }).seq
       lse(samples) - log(numSamples)
@@ -172,59 +168,74 @@ class MTFMInfer(val corpus: Corpus, val params: MTFMParams) {
   sealed class DNode(override val document: Document, override val index: Int)
     extends DocumentNode[DNode](document, index) with TermContainer {
 
-    /**
-      * Computes log probabilities for observing a set of words for each latent
-      * class.
-      */
-    val logPw: Term[DV] = Term {
-      document.count.map { case (word, count) =>
-        (!logTheta)(word, ::).t * count.toDouble
-      }.fold(ZERO)(_ + _)
+    object _tau {
+      def sample(): Seq[(Int, Boolean)] = ???
+      val logTau: Term[Map[Int, Double]] = Term {
+        ???
+      }
     }
+    val tau: Term[Map[Int, Double]] = Term { (!_tau.logTau).mapValues(exp(_)) }
 
-    val eDist: Term[DV] = Term { exp((!logPw) - lse(!logPw)) }
+    object _z {
+      def sample(): Int = ???
+      /**
+        * Computes log probabilities for observing a set of words for each latent
+        * class.
+        */
+      val logPw: Term[DV] = Term {
+        document.count.map { case (word, count) =>
+          (!logTheta) (word, ::).t * count.toDouble
+        }.fold(ZERO)(_ + _)
+      }
 
-    val backward: Term[DenseVector[Double]] = Term {
-      // Lambda messages regarding likelihood of observing the document
-      val msg1 = !logPw
-      // Lambda messages from children
-      var msg2 = replies.map(!_.backwardMsg).fold(ZERO)(_ + _)
-      msg1 :+ msg2
-    }
+      val eDist: Term[DV] = Term {
+        exp((!logPw) - lse(!logPw))
+      }
 
-    val backwardMsg: Term[DenseVector[Double]] = Term {
-      lse(a.t, !backward)
-    }
+      val backward: Term[DenseVector[Double]] = Term {
+        // Lambda messages regarding likelihood of observing the document
+        val msg1 = !logPw
+        // Lambda messages from children
+        var msg2 = replies.map(!_._z.backwardMsg).fold(ZERO)(_ + _)
+        msg1 :+ msg2
+      }
 
-    val forward: Term[DenseVector[Double]] = Term {
-      parent match {
-        case None => !logPi
-        case Some(p) =>
-          val msg1: DenseVector[Double] = !p.forward
-          val msg2 = siblings
-            .map((sibling) => !sibling.backwardMsg)
-            .fold(ZERO)(_ + _)
-          msg1 + msg2
+      val backwardMsg: Term[DenseVector[Double]] = Term {
+        lse(a.t, !backward)
+      }
+
+      val forward: Term[DenseVector[Double]] = Term {
+        parent match {
+          case None => !logPi
+          case Some(p) =>
+            val msg1: DenseVector[Double] = !p._z.forward
+            val msg2 = siblings
+              .map((sibling) => !sibling._z.backwardMsg)
+              .fold(ZERO)(_ + _)
+            msg1 + msg2
+        }
+      }
+
+      val logZ: Term[DenseVector[Double]] = Term {
+        val tmp = !backward :+ !forward
+        tmp - lse(tmp)
       }
     }
 
-    val logZ: Term[DenseVector[Double]] = Term {
-      val tmp = !backward :+ !forward
-      tmp - lse(tmp)
-    }
-
-    val z: Term[DenseVector[Double]] = Term { exp(!logZ) }
+    val z: Term[DenseVector[Double]] = Term { exp(!_z.logZ) }
 
     val topicProbs: Term[Map[Int, Double]] = Term {
       (!z).toArray.zipWithIndex.map(t => t._2 -> t._1).toMap
     }
 
-    def logP(topics: Map[DNode, Int]): Double = {
+    def logP(topics: Map[DNode, Int], noise: Map[DNode, Seq[(Int, Boolean)]]): Double = {
       parent match {
         case Some(p) => (!logA)(topics(p), topics(this))
         case None => (!logPi)(topics(this))
       }
     }
+
+    def logQ(topics: Map[DNode, Int], noise: Map[DNode, Seq[(Int, Boolean)]]): Double = ???
   }
 
   sealed class DTree(val root: DNode) {
@@ -237,7 +248,5 @@ class MTFMInfer(val corpus: Corpus, val params: MTFMParams) {
 
     lazy val nodes: Seq[DNode] = expand(root)
     lazy val leaves: Seq[DNode] = nodes.filter(_.replies.size <= 0)
-
-    def logP(topics: Map[DNode, Int]): Double = nodes.map(_.logP(topics)).sum
   }
 }

@@ -22,10 +22,10 @@ class LatentCommunityTFM
   val C: Int = numCommunities
 
   /** MODEL PARAMETERS **/
-  val pi: Array[Vector]    = (1 to C).map(_ => normalize(DenseVector.rand(K))).toArray // k x g
-  val phi: Vector          = normalize(DenseVector.rand(C), 1.0) // 1 x g
-  val a: Array[Matrix]     = (1 to C).map(_ => normalize(DenseMatrix.rand(K, K), Axis._1, 1.0)).toArray // g x k x k
-  val theta: Matrix        = normalize(DenseMatrix.rand(M, K), Axis._0, 1.0) // m x k
+  val pi: Array[DV]    = (1 to C).map(_ => normalize(DenseVector.rand(K))).toArray // k x g
+  val phi: DV          = normalize(DenseVector.rand(C), 1.0) // 1 x g
+  val a: Array[DM]     = (1 to C).map(_ => normalize(DenseMatrix.rand(K, K), Axis._1, 1.0)).toArray // g x k x k
+  val theta: DM        = normalize(DenseMatrix.rand(M, K), Axis._0, 1.0) // m x k
 
   private var optim: VariationalEMOptimizer = _
 
@@ -86,33 +86,33 @@ trait CATFMParams extends TermContainer {
   val K: Int
   val C: Int
 
-  val pi: Array[Vector]
-  val logPi: Term[Array[Vector]] = Term {
+  val pi: Array[DV]
+  val logPi: Term[Array[DV]] = Term {
     pi.map(log(_))
   }
-  val phi: Vector
-  val logPhi: Term[Vector] = Term {
+  val phi: DV
+  val logPhi: Term[DV] = Term {
     log(phi)
   }
-  val logSumPi: Term[Vector] = Term {
-    val sumPi: Vector = pi.zipWithIndex
+  val logSumPi: Term[DV] = Term {
+    val sumPi: DV = pi.zipWithIndex
       .map { case (pi_g, g) => pi_g :* phi(g) }
       .reduce(_ + _)
     log(sumPi)
   }
-  val a: Array[Matrix]
-  val logA: Term[Array[Matrix]] = Term {
+  val a: Array[DM]
+  val logA: Term[Array[DM]] = Term {
     a.map(log(_))
   }
   // Used as a ``normalizing constant'' for the variational inference step of each user's group
-  val logSumA: Term[Matrix] = Term {
-    val sumA: Matrix = a.zipWithIndex
+  val logSumA: Term[DM] = Term {
+    val sumA: DM = a.zipWithIndex
       .map { case (a_g, g) => a_g :* phi(g) }
       .reduce(_ + _)
     log(sumA)
   }
-  val theta: Matrix
-  val logTheta: Term[Matrix] = Term {
+  val theta: DM
+  val logTheta: Term[DM] = Term {
     log(theta)
   }
 }

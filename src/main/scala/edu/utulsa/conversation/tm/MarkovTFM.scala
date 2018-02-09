@@ -24,9 +24,12 @@ class MarkovTFM
   override val K: Int = numTopics
   override val M: Int = numWords
 
-  override val pi: Vector =    normalize(DenseVector.rand[Double](K)) // k x 1
-  override val a: Matrix =     normalize(DenseMatrix.rand(K, K), Axis._0, 1.0) // k x k
-  override val theta: Matrix = normalize(DenseMatrix.rand(M, K), Axis._0, 1.0) // m x k
+  override val pi: DV =    normalize(DenseVector.rand[Double](K)) // k x 1
+  override val a: DM =     normalize(DenseMatrix.rand(K, K), Axis._0, 1.0) // k x k
+  override val theta: DM = normalize(DenseMatrix.rand(M, K), Axis._0, 1.0) // m x k
+
+  override var rho: Double = 0.5
+  override val phi: DV   = normalize(DenseVector.rand(M), 1.0)
 
   override val params: Map[String, AnyVal] = super.params ++ Map(
     "num-words" -> numWords,
@@ -92,4 +95,11 @@ sealed trait MTFMParams extends TermContainer {
   val logTheta: Term[DenseMatrix[Double]] = Term {
     log(theta)
   }
+
+  var rho: Double
+  val logRho: Term[Double] = Term { log(rho) }
+  val logRhoInv: Term[Double] = Term { log(1-rho) }
+
+  val phi: DV
+  val logPhi: Term[DV] = Term { log(phi) }
 }

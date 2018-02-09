@@ -99,7 +99,7 @@ class LDAOptimizer(val params: LDAParams) {
       val phi: Seq[(Int, Int, DenseVector[Double])] = {
         document.count.map { case (word, count) =>
           (word, count, DenseVector.zeros[Double](numTopics))
-        }
+        }.toSeq
       }
 
       // Part (2) of Algorithm in Figure 5 of Blei paper

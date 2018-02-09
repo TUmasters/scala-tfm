@@ -16,12 +16,12 @@ class UnigramTM
 ) extends TopicModel(numTopics) with UTMParams {
 
   /** PARAMETERS **/
-  val pi: Vector = DenseVector.rand(numTopics)
-  val theta: Matrix = normalize(DenseMatrix.rand(numWords, numTopics), Axis._0, 1.0)
+  val pi: DV = DenseVector.rand(numTopics)
+  val theta: DM = normalize(DenseMatrix.rand(numWords, numTopics), Axis._0, 1.0)
 
   /** RANDOM WORD DISTRIBUTION **/
-  var rho: Double = 0.1
-  val phi: Vector = normalize(DenseVector.rand(numWords), 1.0)
+  var rho: Double = 1e-5
+  val phi: DV = normalize(DenseVector.rand(numWords), 1.0)
 
   var optim: UTMOptimizer = _
 
@@ -69,13 +69,13 @@ sealed trait UTMParams extends TermContainer {
   val pi: DenseVector[Double]
   val theta: DenseMatrix[Double]
   var rho: Double
-  val phi: Vector
+  val phi: DV
 
-  val logPi: Term[Vector] = Term { log(pi) }
-  val logTheta: Term[Matrix] = Term { log(theta) }
+  val logPi: Term[DV] = Term { log(pi) }
+  val logTheta: Term[DM] = Term { log(theta) }
   val logRho: Term[Double] = Term { log(rho) }
   val logRhoInv: Term[Double] = Term { log(1-rho) }
-  val logPhi: Term[Vector] = Term { log(phi) }
+  val logPhi: Term[DV] = Term { log(phi) }
 }
 
 sealed class UTMOptimizer(val corpus: Corpus, val params: UTMParams) {
@@ -91,16 +91,17 @@ sealed class UTMOptimizer(val corpus: Corpus, val params: UTMParams) {
         phi(word) :+= count.toDouble
       }
     }
-    rho = 1e-6
+    phi := normalize(phi, 1.0)
+    rho = 0.01
     params.update()
 
     for(iter <- 1 to numIterations) {
       eStep()
-      mStep()
+      mStep(iter)
     }
   }
 
-  def mStep(): Unit = {
+  def mStep(iter: Int): Unit = {
     pi := nodes.map(!_.z).reduce(_ + _)
     pi := normalize(pi + 1e-3, 1.0)
 
@@ -112,8 +113,7 @@ sealed class UTMOptimizer(val corpus: Corpus, val params: UTMParams) {
     }
     theta := normalize(theta, Axis._0, 1.0)
 
-    rho = nodes.map(!_.tau_terms.sumTau).sum / nodes.map(_.numWords).sum
-    println(rho)
+    rho = nodes.map(!_._tau.sumTau).sum / nodes.map(_.numWords).sum
 
     phi := DenseVector.ones[Double](numWords) * 0.1
     nodes.par.foreach { node =>
@@ -135,24 +135,23 @@ sealed class UTMInfer(val corpus: Corpus, val params: UTMParams) {
   import params._
   import edu.utulsa.util.math._
 
-  val ZERO: Vector = DenseVector.zeros(numTopics)
+  val ZERO: DV = DenseVector.zeros(numTopics)
 
-//  def likelihood: Double = {
-//    inferUpdate()
-//    nodes.map(node => lse(!node.logPwz + !logPi)).sum
-//  }
+  def likelihood: Double = {
+    inferUpdate()
+    nodes.map(node => lse(!node._z.logPwz + !logPi)).sum
+  }
 
   def approxLikelihood(numSamples: Int = 100): Double = {
+    println(likelihood / corpus.wordCount)
     inferUpdate()
-    val rand = new Random()
     val lls = nodes.par.map(node => {
       val samples: Seq[Double] = (1 to numSamples).par.map(i => {
         // compute likelihood on this sample
-        val topic = sample((!node.z).toArray.zipWithIndex.map(x => x._2 -> x._1).toMap)
-        val noise = node.document.words.map { word => word -> (rand.nextDouble() < (!node.tau)(word)) }.toMap
+        val topic = node._z.draw()
+        val noise = node._tau.draw()
         val logP = node.logP(topic, noise)
-        val logZ = (!logPi)(topic)
-        val logQ = (!node.z_terms.logZ)(topic) + node.tau_terms.logP(noise)
+        val logQ = node.logQ(topic, noise)
         logP - logQ
       }).seq
       lse(samples) - log(numSamples)
@@ -181,15 +180,26 @@ sealed class UTMInfer(val corpus: Corpus, val params: UTMParams) {
   val nodes: Seq[DNode] = corpus.extend(new DNode(_, _))
 
   class DNode(override val document: Document, override val index: Int) extends DocumentNode[DNode](document, index) {
-    lazy val numWords: Int = document.count.map(_._2).sum
+    lazy val numWords: Int = document.count.values.sum
 
-    object tau_terms extends TermContainer {
+    object _tau extends TermContainer {
+      def draw(): Seq[(Int, Boolean)] = {
+        document.count.map { case (word, _) =>
+          (word, Random.nextDouble() <= (!tau)(word))
+        }.toSeq
+      }
+
       val logTau: Term[Map[Int, Double]] = Term {
-        document.count.map { case (word, count) =>
-          val logP1 = (!logPhi)(word) + !logRho
-          val logP2 = sum((!logTheta)(word, ::).t :* !z) + !logRhoInv
+        val terms = document.count.map { case (word, count) =>
+          val logP1 = ((!logPhi)(word) + !logRho) * numTopics
+          val logP2 = sum((!logTheta)(word, ::).t :+ !logPi) + !logRhoInv * numTopics
+//          println()
+//          println(s"$logP1 $logP2")
+//          println(s"${(!logPhi)(word)} ${!logRho}")
           word -> (logP1 - lse(Seq(logP1, logP2)))
-        }.toMap
+        }
+//        if(index == 0) println(terms)
+        terms
       }.initialize {
         document.words.map { word =>
           word -> -100d
@@ -200,22 +210,18 @@ sealed class UTMInfer(val corpus: Corpus, val params: UTMParams) {
           (!tau)(word) * count
         }.sum
       }
-      def logP(noise: Map[Int, Boolean]): Double = {
-        document.words.map { word =>
-          if(noise(word))
-            (!logTau)(word)
-          else
-            1-(!logTau)(word)
-        }.sum
-      }
     }
-    val tau: Term[Map[Int, Double]] = Term { (!tau_terms.logTau).map(t => t._1 -> exp(t._2)) }
+    val tau: Term[Map[Int, Double]] = Term { (!_tau.logTau).map(t => t._1 -> exp(t._2)) }
 
     /**
       * Per-topic word probabilities
       */
-    object z_terms extends TermContainer {
-      val logPwz: Term[Vector] = Term {
+    object _z extends TermContainer {
+      def draw(): Int = {
+        sample(!topicProbs)
+      }
+
+      val logPwz: Term[DV] = Term {
         document.count.map { case (word, count) =>
           (1-(!tau)(word)) * (!logTheta)(word, ::).t * count.toDouble
         }.fold(ZERO)(_ + _)
@@ -224,33 +230,52 @@ sealed class UTMInfer(val corpus: Corpus, val params: UTMParams) {
       /**
         * Latent topic distribution.
         */
-      val logZ: Term[Vector] = Term {
+      val logZ: Term[DV] = Term {
         val lq = (!logPi) :+ (!logPwz)
         lq - lse(lq)
       }.initialize(normalize(DenseVector.rand(numTopics)))
+
+      val topicProbs: Term[Map[Int, Double]] = Term {
+        (!z).toArray.zipWithIndex.map(x => x._2 -> x._1).toMap
+      }
     }
-    val z: Term[Vector] = Term {
-      exp(!z_terms.logZ)
+    val z: Term[DV] = Term {
+      exp(!_z.logZ)
     }
 
-    def logP(topic: Int, noise: Map[Int, Boolean]): Double = {
-      document.count.map { case (word, count) =>
-        if(noise(word))
+    def logP(topic: Int, noise: Seq[(Int, Boolean)]): Double = {
+      noise.map { case (word, isNoise) =>
+        val count = document.count(word)
+        if(isNoise)
           ((!logRho) + (!logPhi)(word)) * count
         else
           ((!logRhoInv) + (!logTheta)(word, topic)) * count
       }.sum + (!logPi)(topic)
+//      document.count.map { case (word, count) =>
+//        ((!logRhoInv) + (!logTheta)(word, topic)) * count
+//      }.sum + (!logPi)(topic)
+    }
+
+    def logQ(topic: Int, noise: Seq[(Int, Boolean)]): Double = {
+      val term1 = (!_z.logZ)(topic)
+      val term2 = noise.map { case (word, isNoise) =>
+        if(isNoise)
+          log((!tau)(word))
+        else
+          log(1-(!tau)(word))
+      }.sum
+      term1 + term2
     }
 
     def update(): Unit = {
-      for(_ <- 1 to 5) {
-        tau_terms.reset()
-        tau_terms.logTau.update()
+//      for(_ <- 1 to 5) {
+        _tau.reset()
+        _tau.logTau.update()
         tau.reset()
-        z_terms.reset()
-        z_terms.logZ.update()
+        _z.reset()
+        _z.logZ.update()
         z.reset()
       }
-    }
+//    }
   }
 }
