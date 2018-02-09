@@ -41,6 +41,7 @@ trait TermContainer {
     terms.foreach(_.reset())
   }
   def update(): Unit = {
+    terms.foreach(_.reset())
     terms.foreach(_.update())
   }
 }

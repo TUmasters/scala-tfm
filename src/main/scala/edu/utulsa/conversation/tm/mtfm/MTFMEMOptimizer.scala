@@ -184,32 +184,32 @@ class MTFMInfer(val corpus: Corpus, val params: MTFMParams) {
 
     val eDist: Term[DV] = Term { exp((!logPw) - lse(!logPw)) }
 
-    val lambda: Term[DenseVector[Double]] = Term {
+    val backward: Term[DenseVector[Double]] = Term {
       // Lambda messages regarding likelihood of observing the document
       val msg1 = !logPw
       // Lambda messages from children
-      var msg2 = replies.map(!_.lambdaMsg).fold(ZERO)(_ + _)
+      var msg2 = replies.map(!_.backwardMsg).fold(ZERO)(_ + _)
       msg1 :+ msg2
     }
 
-    val lambdaMsg: Term[DenseVector[Double]] = Term {
-      lse(a.t, !lambda)
+    val backwardMsg: Term[DenseVector[Double]] = Term {
+      lse(a.t, !backward)
     }
 
-    val tau: Term[DenseVector[Double]] = Term {
+    val forward: Term[DenseVector[Double]] = Term {
       parent match {
         case None => !logPi
         case Some(p) =>
-          val msg1: DenseVector[Double] = !p.tau
+          val msg1: DenseVector[Double] = !p.forward
           val msg2 = siblings
-            .map((sibling) => !sibling.lambdaMsg)
+            .map((sibling) => !sibling.backwardMsg)
             .fold(ZERO)(_ + _)
           msg1 + msg2
       }
     }
 
     val logZ: Term[DenseVector[Double]] = Term {
-      val tmp = !lambda :+ !tau
+      val tmp = !backward :+ !forward
       tmp - lse(tmp)
     }
 
