@@ -15,6 +15,8 @@ import edu.utulsa.conversation.tm.MTFMParams
 import edu.utulsa.util._
 import edu.utulsa.util.Term
 
+import scala.util.Random
+
 sealed class MTFMOptimizer
 (
   val corpus: Corpus,
@@ -94,11 +96,32 @@ sealed class MTFMOptimizer
         theta := DenseMatrix.ones[Double](M, K) * 0.1
         nodes.par.foreach { node =>
           node.document.count.foreach { case (word, count) =>
-            theta(word, ::) :+= (!node.z).t * count.toDouble
+            theta(word, ::) :+= (!node.z).t * count.toDouble * (1-(!node.tau)(word))
           }
         }
         theta := normalize(theta, Axis._0, 1.0)
         //        theta := normalize((q * c).t + 1e-6, Axis._0, 1.0)
+      },
+      () => {
+        rho = nodes.map(!_._tau.sumTau).sum / corpus.wordCount
+        println(rho)
+
+        phi := DenseVector.ones[Double](M) * 0.01
+        nodes.par.foreach { node =>
+          node.document.count.foreach { case (word, count) =>
+            phi(word) :+= (!node.tau)(word) * count.toDouble
+          }
+        }
+        phi := normalize(phi, 1.0)
+
+        def topWords(a: DV): Unit = {
+          val topWords = a.toArray.zipWithIndex.sortBy(-_._1)
+            .take(10)
+            .map { case (p, word) => (corpus.words(word), p) }
+          println(topWords.toSeq)
+        }
+        topWords(phi)
+        topWords(theta(::, 0))
       }
     ).par.foreach { case (step) => step() }
 
@@ -125,25 +148,9 @@ class MTFMInfer(val corpus: Corpus, val params: MTFMParams) {
   def update(): Unit = {
     trees.par.foreach { case (tree) =>
       tree.nodes.foreach { node => node.reset() }
-      tree.nodes.foreach { node => node.update() }
+      tree.nodes.foreach { node => node.tau.update() }
+      tree.nodes.foreach { node => node.z.update() }
     }
-    //    val dist = nodes.map { n =>
-    //      n.parent match {
-    //        case Some(p) => norm(a.t * (!p.z) - !n.eDist)
-    //        case None => norm(pi - !n.eDist)
-    //      }
-    //    }.sum / nodes.size
-    //    val p2 = nodes.map { n =>
-    //      n.parent match {
-    //        case Some(p) => log((!p.z).t * a * (!n.z))
-    //        case None => lse((!logPi) + !n.logZ)
-    //      }
-    //    }.sum / nodes.size
-    //    val p1 = nodes.map { n =>
-    //      lse((!n.logPw) + (!n.logZ))
-    //    }.sum / corpus.wordCount
-    ////    println(dist)
-    //    println(f"$p1%6.4f + $p2%6.4f")
   }
 
   def approxLikelihood(numSamples: Int = 100): Double = {
@@ -151,8 +158,8 @@ class MTFMInfer(val corpus: Corpus, val params: MTFMParams) {
     val lls = trees.par.map(tree => {
       val samples: Seq[Double] = (1 to numSamples).par.map(i => {
         // compute likelihood on this sample
-        val topics: Map[DNode, Int] = tree.nodes.map(node => node -> node._z.sample()).toMap
-        val noise: Map[DNode, Seq[(Int, Boolean)]] = tree.nodes.map(node => node -> node._tau.sample()).toMap
+        val topics: Map[DNode, Int] = tree.nodes.map(node => node -> node._z.draw()).toMap
+        val noise: Map[DNode, Map[Int, Boolean]] = tree.nodes.map(node => node -> node._tau.draw()).toMap
         val logP = tree.nodes.map(node => node.logP(topics, noise)).sum
         val logQ = tree.nodes.map(node => node.logQ(topics, noise)).sum
         logP - logQ
@@ -166,35 +173,48 @@ class MTFMInfer(val corpus: Corpus, val params: MTFMParams) {
     * Inference on documents.
     */
   sealed class DNode(override val document: Document, override val index: Int)
-    extends DocumentNode[DNode](document, index) with TermContainer {
+    extends DocumentNode[DNode](document, index) {
 
-    object _tau {
-      def sample(): Seq[(Int, Boolean)] = ???
+    object _tau extends TermContainer {
+      def draw(): Map[Int, Boolean] = (!tau).mapValues(Random.nextDouble() < _)
       val logTau: Term[Map[Int, Double]] = Term {
-        ???
+        document.count.map { case (word, _) =>
+          val logP1: Double = ((!logPhi)(word) + !logRho) * K
+          val logP2: Double = parent match {
+            case Some(p) => log((!p.z).t * a * theta(word, ::).t) + !logRhoInv * K
+            case None => sum((!logTheta)(word, ::).t + !logPi) + !logRhoInv * K
+          }
+          if(corpus.words(word) == "peopl") {
+            println(logP1, logP2)
+          }
+          word -> (logP1 - lse(Seq(logP1, logP2)))
+        }
+      }
+
+      val sumTau: Term[Double] = Term {
+        document.count.map { case (word, count) =>
+          (!tau)(word) * count
+        }.sum
       }
     }
     val tau: Term[Map[Int, Double]] = Term { (!_tau.logTau).mapValues(exp(_)) }
 
-    object _z {
-      def sample(): Int = ???
+    object _z extends TermContainer {
+      def draw(): Int = sample(!topicProbs)
+
       /**
         * Computes log probabilities for observing a set of words for each latent
         * class.
         */
-      val logPw: Term[DV] = Term {
+      val logPwz: Term[DV] = Term {
         document.count.map { case (word, count) =>
-          (!logTheta) (word, ::).t * count.toDouble
+          (!logTheta) (word, ::).t * count.toDouble * (1-(!tau)(word))
         }.fold(ZERO)(_ + _)
-      }
-
-      val eDist: Term[DV] = Term {
-        exp((!logPw) - lse(!logPw))
       }
 
       val backward: Term[DenseVector[Double]] = Term {
         // Lambda messages regarding likelihood of observing the document
-        val msg1 = !logPw
+        val msg1 = !logPwz
         // Lambda messages from children
         var msg2 = replies.map(!_._z.backwardMsg).fold(ZERO)(_ + _)
         msg1 :+ msg2
@@ -220,22 +240,52 @@ class MTFMInfer(val corpus: Corpus, val params: MTFMParams) {
         val tmp = !backward :+ !forward
         tmp - lse(tmp)
       }
-    }
 
-    val z: Term[DenseVector[Double]] = Term { exp(!_z.logZ) }
-
-    val topicProbs: Term[Map[Int, Double]] = Term {
-      (!z).toArray.zipWithIndex.map(t => t._2 -> t._1).toMap
-    }
-
-    def logP(topics: Map[DNode, Int], noise: Map[DNode, Seq[(Int, Boolean)]]): Double = {
-      parent match {
-        case Some(p) => (!logA)(topics(p), topics(this))
-        case None => (!logPi)(topics(this))
+      val topicProbs: Term[Map[Int, Double]] = Term {
+        (!z).toArray.zipWithIndex.map(t => t._2 -> t._1).toMap
       }
     }
+    val z: Term[DenseVector[Double]] = Term { exp(!_z.logZ) }.initialize(DenseVector.rand(K))
 
-    def logQ(topics: Map[DNode, Int], noise: Map[DNode, Seq[(Int, Boolean)]]): Double = ???
+    def logP(topics: Map[DNode, Int], noises: Map[DNode, Map[Int, Boolean]]): Double = {
+      val topic = topics(this)
+      val noise = noises(this)
+      val term1 = parent match {
+        case Some(p) => (!logA)(topics(p), topic)
+        case None => (!logPi)(topic)
+      }
+      val term2 = noise.map { case (word, isNoise) =>
+        val count = document.count(word)
+        if(isNoise)
+          ((!logRho) + (!logPhi)(word)) * count
+        else
+          ((!logRhoInv) + (!logTheta)(word, topic)) * count
+      }.sum
+      term1 + term2
+    }
+
+    def logQ(topics: Map[DNode, Int], noises: Map[DNode, Map[Int, Boolean]]): Double = {
+      val topic = topics(this)
+      val noise = noises(this)
+      val term1 = (!_z.logZ)(topic)
+      val term2 = noise.map { case (word, isNoise) =>
+        if(isNoise)
+          log((!tau)(word))
+        else
+          log(1-(!tau)(word))
+      }.sum
+      term1 + term2
+    }
+
+    def reset(): Unit = {
+      _tau.reset()
+      _z.reset()
+    }
+
+    def update(): Unit = {
+      tau.update()
+      z.update()
+    }
   }
 
   sealed class DTree(val root: DNode) {

@@ -55,6 +55,7 @@ def palmetto(words, method='umass', base_url='http://localhost:7777'):
 
 
 def topic_coherence(model_dir):
+    print(model_dir)
     with open(model_dir + '/params.json', 'r') as f:
         params = json.load(f)
 
@@ -78,13 +79,14 @@ def topic_coherence(model_dir):
     scores = []
     for k in range(params['num-topics']):
         score = palmetto(top_words[k])
+        print('{:2d}  {:6.2f}  '.format(k, score) + ', '.join(top_words[k]))
         scores += [score]
-    return np.mean(scores)
+    return np.median(scores)
 
 
 scores = []
 for trial in range(0, 10):
-    trial_dir = model_dir + '/trial{:02d}'.format(trial)
+    trial_dir = model_dir + '/new-trial{:02d}'.format(trial)
     scores += [topic_coherence(trial_dir)]
 
 score_cols = ["{:2.5f}".format(score) for score in scores]

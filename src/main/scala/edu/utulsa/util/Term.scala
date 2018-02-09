@@ -3,8 +3,16 @@ package edu.utulsa.util
 import scala.collection.mutable
 
 class Term[T] private(calc: => T) {
+  private var store: Boolean = false
+  def storeOld: this.type = {
+    store = true
+    this
+  }
+  var oldValue: Option[T] = None
   var value: Option[T] = None
   def reset(): Unit = {
+    if(store)
+      oldValue = value
     value = None
   }
   def update(): T = {

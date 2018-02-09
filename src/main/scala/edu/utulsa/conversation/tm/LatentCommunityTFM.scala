@@ -27,6 +27,10 @@ class LatentCommunityTFM
   val a: Array[DM]     = (1 to C).map(_ => normalize(DenseMatrix.rand(K, K), Axis._1, 1.0)).toArray // g x k x k
   val theta: DM        = normalize(DenseMatrix.rand(M, K), Axis._0, 1.0) // m x k
 
+  /** RANDOM WORD DISTRIBUTION **/
+  var rho: Double = 1e-5
+  val phi2: DV = normalize(DenseVector.rand(numWords), 1.0)
+
   private var optim: VariationalEMOptimizer = _
 
   override lazy val params: Map[String, AnyVal] = super.params ++ Map(
@@ -115,4 +119,11 @@ trait CATFMParams extends TermContainer {
   val logTheta: Term[DM] = Term {
     log(theta)
   }
+
+  var rho: Double
+  val phi2: DV // i really need a better naming scheme
+
+  val logRho: Term[Double] = Term { log(rho) }
+  val logRhoInv: Term[Double] = Term { log(1-rho) }
+  val logPhi2: Term[DV] = Term { log(phi2) }
 }
