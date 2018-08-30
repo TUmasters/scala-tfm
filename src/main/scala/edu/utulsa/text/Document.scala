@@ -1,4 +1,4 @@
-package edu.utulsa.conversation.text
+package edu.utulsa.text
 
 class Document
 (

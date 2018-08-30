@@ -1,11 +1,12 @@
-package edu.utulsa.conversation.tm.catfm
+package edu.utulsa.text.tm.catfm
 
 import breeze.linalg._
 import breeze.numerics.{exp, log}
 import java.io.File
 
-import edu.utulsa.conversation.text.{Corpus, Dictionary, Document, DocumentNode}
-import edu.utulsa.conversation.tm.CATFMParams
+import edu.utulsa.text.{Corpus, Document, DocumentNode}
+import edu.utulsa.text.{Dictionary, Document, DocumentNode}
+import edu.utulsa.text.tm.CATFMParams
 import edu.utulsa.util.{Term, TermContainer}
 import edu.utulsa.util.math._
 

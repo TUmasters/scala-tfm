@@ -1,19 +1,12 @@
-package edu.utulsa.conversation.tm
+package edu.utulsa.text.tm
 
-import breeze.linalg._
-import breeze.numerics.{exp, log}
 import java.io.File
 
-import org.json4s._
-import org.json4s.native.Serialization
-import org.json4s.native.Serialization.write
-import java.io.PrintWriter
-
-import edu.utulsa.cli.{CLIParser, Param}
-import edu.utulsa.conversation.text.{Corpus, Dictionary, Document, DocumentNode}
-import edu.utulsa.conversation.tm.mtfm.{MTFMInfer, MTFMOptimizer}
-import edu.utulsa.util._
-import edu.utulsa.util.Term
+import breeze.linalg._
+import breeze.numerics.log
+import edu.utulsa.text.Corpus
+import edu.utulsa.text.tm.mtfm.{MTFMInfer, MTFMOptimizer}
+import edu.utulsa.util.{Term, _}
 
 class MarkovTFM
 (
@@ -24,9 +17,9 @@ class MarkovTFM
   override val K: Int = numTopics
   override val M: Int = numWords
 
-  override val pi: Vector =    normalize(DenseVector.rand[Double](K)) // k x 1
-  override val a: Matrix =     normalize(DenseMatrix.rand(K, K), Axis._0, 1.0) // k x k
-  override val theta: Matrix = normalize(DenseMatrix.rand(M, K), Axis._0, 1.0) // m x k
+  override val pi: DV =    normalize(DenseVector.rand[Double](K)) // k x 1
+  override val a: DM =     normalize(DenseMatrix.rand(K, K), Axis._0, 1.0) // k x k
+  override val theta: DM = normalize(DenseMatrix.rand(M, K), Axis._0, 1.0) // m x k
 
   override val params: Map[String, AnyVal] = super.params ++ Map(
     "num-words" -> numWords,

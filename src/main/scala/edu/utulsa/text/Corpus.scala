@@ -1,10 +1,6 @@
-package edu.utulsa.conversation.text
+package edu.utulsa.text
 
-import java.io.{File, PrintWriter}
-
-import org.json4s._
-import org.json4s.native.Serialization
-import org.json4s.native.Serialization.write
+import java.io.File
 
 class DocumentNode[T <: DocumentNode[T]](val document: Document, val index: Int) {
   private[text] var theParent: Option[T] = None
@@ -85,8 +81,6 @@ object Corpus {
     case class DocumentData(id: String, words: Seq[String], parent: String, author: String)
     import org.json4s._
     import org.json4s.native.JsonMethods._
-    import org.json4s.native.Serialization
-    import org.json4s.native.Serialization.write
 
     val dir: File = file.getParentFile
     case class JSONDocument(id: String, words: List[String], parent: String, author: String)

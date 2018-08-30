@@ -1,13 +1,8 @@
-package edu.utulsa.conversation.tm
+package edu.utulsa.text.tm
 
 import java.io.{File, PrintWriter}
 
-import breeze.linalg._
-import breeze.numerics.log
-import edu.utulsa.cli.{Param, CLIParser, validators}
-import edu.utulsa.conversation.text.{Corpus, Dictionary}
-
-import scala.collection.mutable
+import edu.utulsa.text.Corpus
 
 case class TPair(p: Double, topic: Int)
 case class DocumentTopic(id: String, topics: List[TPair])
@@ -41,7 +36,7 @@ abstract class TopicModel
     import org.json4s.native.Serialization
     import org.json4s.native.Serialization.writePretty
 
-    implicit val formats = Serialization.formats(NoTypeHints)
+    implicit val formats: Formats = Serialization.formats(NoTypeHints)
 
     file.createNewFile()
     Some(new PrintWriter(file))

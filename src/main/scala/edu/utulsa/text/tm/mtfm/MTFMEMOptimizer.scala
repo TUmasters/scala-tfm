@@ -1,26 +1,16 @@
-package edu.utulsa.conversation.tm.mtfm
+package edu.utulsa.text.tm.mtfm
 
 import breeze.linalg._
 import breeze.numerics.{exp, log}
-import java.io.File
-
-import org.json4s._
-import org.json4s.native.Serialization
-import org.json4s.native.Serialization.write
-import java.io.PrintWriter
-
-import edu.utulsa.cli.{CLIParser, Param}
-import edu.utulsa.conversation.text.{Corpus, Dictionary, Document, DocumentNode}
-import edu.utulsa.conversation.tm.MTFMParams
-import edu.utulsa.util._
-import edu.utulsa.util.Term
+import edu.utulsa.text.tm.MTFMParams
+import edu.utulsa.text.{Corpus, Document, DocumentNode}
+import edu.utulsa.util.{Term, _}
 
 sealed class MTFMOptimizer
 (
   val corpus: Corpus,
   val params: MTFMParams
 ) {
-  import edu.utulsa.util.math._
   import params._
 
   type DV = DenseVector[Double]

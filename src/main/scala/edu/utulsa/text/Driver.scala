@@ -1,10 +1,9 @@
-package edu.utulsa.conversation
+package edu.utulsa.text
 
 import java.io.File
 
 import edu.utulsa.cli.{Action, CLIApp, Command, Param, ParamConverter, validators}
-import edu.utulsa.conversation.text.{Corpus, Document}
-import edu.utulsa.conversation.tm._
+import edu.utulsa.text.tm._
 
 import scala.collection.mutable
 
@@ -88,7 +87,28 @@ object Driver extends CLIApp {
         new UnigramTM($(numTopics), $(corpus).words.size, $(numIterations))
       }
     })
+    .add(new Command[TopicModel] {
+      override val name: String = "mmtfm"
+      override val help: String = "Mixed Membership Topic Flow Model"
 
+      numTopics.register
+      numIterations.register
+
+      override def exec(): TopicModel = {
+        new MixedMembershipTFM($(numTopics), $(corpus).words.size, $(numIterations))
+      }
+    })
+    .add(new Command[TopicModel] {
+      override val name: String = "lda"
+      override val help: String = "Latent Dirichlet Allocation"
+
+      numTopics.register
+//      numIterations.register
+
+      override def exec(): TopicModel = {
+        new LatentDirichletAllocation($(numTopics), $(corpus).words.size)
+      }
+    })
 
   val action: Action[Unit] = Action("action")
     .help("Action to perform.")
